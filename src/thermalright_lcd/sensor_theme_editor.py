@@ -947,6 +947,7 @@ class SensorThemeEditorPage(QWidget):
         self, store: SensorThemeStore | None = None, parent: QWidget | None = None,
         *, live_value_provider: Callable[[], object] | None = None,
         apply_handler: Callable[[SensorTheme, Path | None, tuple[str, ...], int], object] | None = None,
+        deployment_handler: Callable[[str, SensorTheme | None, Path | None, str], object] | None = None,
         prompt_handler: Callable[[str], str] | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
@@ -955,6 +956,7 @@ class SensorThemeEditorPage(QWidget):
         self.document = SensorThemeDocument(self.store, self)
         self.live_value_provider = live_value_provider
         self.apply_handler = apply_handler
+        self.deployment_handler = deployment_handler
         self.prompt_handler = prompt_handler
         self.now_provider = now_provider
         self._refresh_pending = False; self._nav_guard = False
@@ -1141,16 +1143,18 @@ class SensorThemeEditorPage(QWidget):
         item = self.theme_list.currentItem(); return self.load_theme(item.data(Qt.UserRole)) if item else False
 
     def save(self) -> bool:
+        previous_id = self.document.theme.id if self.document.theme else ""
         try:
             if self.document.built_in: return self.save_as()
-            self.document.save(); self.refresh_theme_browser(); return True
+            self.document.save(); self.refresh_theme_browser(); self._deployment_changed("saved", previous_id); return True
         except Exception as exc: QMessageBox.critical(self, "Could not save theme", str(exc)); return False
 
     def save_as(self) -> bool:
         current = self.document.theme.name if self.document.theme else "Theme"
+        previous_id = self.document.theme.id if self.document.theme else ""
         name, ok = QInputDialog.getText(self, "Save sensor theme as", "Name:", text=f"{current} Copy" if self.document.built_in else current)
         if not ok or not name.strip(): return False
-        try: self.document.save_as(name.strip()); self.refresh_theme_browser(); return True
+        try: self.document.save_as(name.strip()); self.refresh_theme_browser(); self._deployment_changed("saved", previous_id); return True
         except Exception as exc: QMessageBox.critical(self, "Could not save theme", str(exc)); return False
 
     def duplicate_theme(self) -> bool:
@@ -1162,18 +1166,20 @@ class SensorThemeEditorPage(QWidget):
 
     def rename_theme(self) -> bool:
         if self.document.built_in: QMessageBox.information(self, "Built-in theme", "Duplicate the built-in theme before renaming it."); return False
+        previous_id = self.document.theme.id
         name, ok = QInputDialog.getText(self, "Rename sensor theme", "Name:", text=self.document.theme.name)
         if not ok or not name.strip(): return False
-        try: self.document.rename(name.strip()); self.refresh_theme_browser(); return True
+        try: self.document.rename(name.strip()); self.refresh_theme_browser(); self._deployment_changed("saved", previous_id); return True
         except Exception as exc: QMessageBox.critical(self, "Could not rename theme", str(exc)); return False
 
     def delete_theme(self) -> bool:
         if self.document.built_in: QMessageBox.information(self, "Built-in theme", "Built-in themes cannot be deleted."); return False
         if QMessageBox.question(self, "Delete sensor theme", f"Delete '{self.document.theme.name}'?", QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes: return False
+        deleted_id = self.document.theme.id
         try:
             self.document.delete_theme(); available = self.store.list_builtin() + self.store.list_user()
             if available: self.document.load(available[0])
-            self.refresh_theme_browser(); return True
+            self.refresh_theme_browser(); self._deployment_changed("deleted", deleted_id); return True
         except Exception as exc: QMessageBox.critical(self, "Could not delete theme", str(exc)); return False
 
     def import_theme(self) -> bool:
@@ -1208,6 +1214,16 @@ class SensorThemeEditorPage(QWidget):
 
     def set_active_status(self, text: str) -> None:
         self.active_status.setText(text)
+
+    def _deployment_changed(self, event: str, previous_id: str) -> None:
+        if self.deployment_handler is None:
+            return
+        theme = SensorTheme.from_dict(deepcopy(self.document.theme.to_dict())) if event == "saved" and self.document.theme else None
+        try:
+            result = self.deployment_handler(event, theme, self.document.asset_root if theme else None, previous_id)
+            if result: self.active_status.setText(str(result))
+        except Exception as exc:
+            self.active_status.setText(f"Saved locally · active output update failed · {exc}")
 
     def add_selected_palette(self) -> None:
         item = self.palette.currentItem()

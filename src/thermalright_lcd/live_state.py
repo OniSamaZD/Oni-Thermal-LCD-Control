@@ -215,8 +215,9 @@ def validate_identity(actual: DeviceIdentity, expected: DeviceIdentity) -> None:
     if actual.maximum_transfer_size and actual.maximum_transfer_size < expected.maximum_transfer_size: raise SafetyError("maximum transfer size mismatch")
 
 
-def validate_ready(vid_pid: str, data: bytes, exact: bytes) -> dict:
-    if data != exact: raise SafetyError("unexpected readiness response payload")
+def validate_ready(vid_pid: str, data: bytes, exact: bytes, *, validation: str = "exact") -> dict:
+    if validation not in {"exact", "reviewed-fields"}: raise SafetyError("unknown readiness validation policy")
+    if validation == "exact" and data != exact: raise SafetyError("unexpected readiness response payload")
     if vid_pid == "0416:5408":
         if len(data)!=512 or data[:2]!=b"\x03\xff": raise SafetyError("malformed 5408 readiness response")
         fields={"physical_width":int.from_bytes(data[24:26],"little"), "physical_height":int.from_bytes(data[28:30],"little"), "excluded_rows":data[44]}

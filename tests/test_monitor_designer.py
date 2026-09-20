@@ -1,10 +1,11 @@
 import os,tempfile,unittest
+from unittest.mock import patch
 from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 try:
     from PySide6.QtCore import QPointF,Qt
     from PySide6.QtGui import QKeyEvent
-    from PySide6.QtWidgets import QApplication,QGraphicsItem
+    from PySide6.QtWidgets import QApplication,QGraphicsItem,QMessageBox
     from thermalright_lcd.monitor_designer import DesignerScene,HardwareMonitorDesigner,PropertiesPanel,SensorBrowser
     from thermalright_lcd.hardware_monitor import MonitorElement,MonitorLayout
     from thermalright_lcd.sensors import SensorDefinition,SensorValue
@@ -49,5 +50,19 @@ class DesignerTests(unittest.TestCase):
             ids={element.sensor_id for element in dialog.layout.elements}
             self.assertTrue({"cpu.temperature","cpu.usage","cpu.clock","cpu.power","gpu.temperature","gpu.usage","gpu.clock","gpu.power","gpu.memory_used","game.fps","game.frametime","memory.usage"}.issubset(ids))
             self.assertGreaterEqual(len(dialog.layout.elements),20);dialog.load_template();self.assertFalse(dialog.template_previewing);self.assertEqual(dialog.layout.name,"Custom");dialog.reject()
+    def test_named_layout_save_rename_delete_and_restart_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/"settings.json";settings=AppSettings();store=SettingsStore(path);dialog=HardwareMonitorDesigner(settings,store)
+            dialog.layout=MonitorLayout("Custom","0416:5408",1920,462,elements=[MonitorElement("clock",20,20,format_string="%H:%M:%S")]);dialog.layout_name.setText("Desk Stats")
+            self.assertTrue(dialog.save());self.assertIn("Desk Stats",settings.monitor_layout_library["0416:5408"]);self.assertGreaterEqual(dialog.template.findText("Desk Stats"),0)
+            with patch("thermalright_lcd.monitor_designer.QInputDialog.getText",return_value=("Night Stats",True)):
+                self.assertTrue(dialog.rename_layout())
+            self.assertNotIn("Desk Stats",settings.monitor_layout_library["0416:5408"]);self.assertIn("Night Stats",settings.monitor_layout_library["0416:5408"])
+            loaded=store.load();self.assertIn("Night Stats",loaded.monitor_layout_library["0416:5408"]);self.assertEqual(loaded.monitor_templates["0416:5408"],"Night Stats")
+            with patch("thermalright_lcd.monitor_designer.QMessageBox.question",return_value=QMessageBox.Yes):self.assertTrue(dialog.delete_layout())
+            self.assertNotIn("Night Stats",settings.monitor_layout_library["0416:5408"]);dialog.reject()
+    def test_clock_and_date_format_property_is_exposed_consistently(self):
+        panel=PropertiesPanel();clock=MonitorElement("clock",0,0);panel.set_element(clock)
+        self.assertFalse(panel.controls["format_string"].isHidden())
 
 if __name__=="__main__":unittest.main()

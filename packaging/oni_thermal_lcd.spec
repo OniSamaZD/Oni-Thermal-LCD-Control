@@ -7,10 +7,6 @@ import PySide6
 ROOT = Path(SPECPATH).resolve().parent
 
 datas = [
-    (str(ROOT / "config" / "device-allowlist.json"), "config"),
-    (str(ROOT / "analysis" / "session-report.json"), "analysis"),
-    (str(ROOT / "analysis" / "pid5408-new-session-first-frame.json"), "analysis"),
-    (str(ROOT / "analysis" / "pid5302-same-session-first-frame.json"), "analysis"),
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "assets" / "oni-thermal-lcd.ico"), "assets"),

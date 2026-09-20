@@ -2,7 +2,7 @@
 
 Status: captured-sequence CLI replay remains disabled behind fail-closed authorization gates. Generated media in the daily-use GUI is enabled only for the two exact physically confirmed devices and only through the validated per-display `DisplaySession`; application launch, preview, settings, and media selection issue no endpoint writes.
 
-Live USB writes require strict stable identity, ContainerId, device path, interface, endpoint and response validation plus explicit per-attempt authorization. Stop on disconnect, reset, stall, timeout, re-enumeration, or unexpected response. No driver replacement, firmware operation, fuzzing, guessed command, silent process termination, or automatic retry is permitted.
+GUI writes require a reviewed public VID/PID transport definition, one unambiguous read-only discovered instance, and strict stable identity, ContainerId, device path, driver, interface, endpoint/capability, readiness-response, and encoded-frame validation. Stop on disconnect, reset, stall, timeout, re-enumeration, or unexpected response. No driver replacement, firmware operation, fuzzing, guessed command, silent process termination, or automatic retry is permitted. CLI captured replay retains its separate explicit per-attempt authorization.
 
 The repeated-frame command defaults to dry-run. Its live branch is hard-locked to the 30-second capture-derived plan and requires every standard gate plus a fresh persistence-specific phrase. Offline plans are hard-bounded, use exact capture-derived frames, zero retries, stable identity revalidation, and exact PID 5408 ACK validation. Both `allowLiveReplay` values remain false. GUI startup, previews, profiles, and media decoding issue no endpoint writes.
 
@@ -12,7 +12,7 @@ The repeated-frame command defaults to dry-run. Its live branch is hard-locked t
 
 Normal transitions are `DISCONNECTED → DISCOVERED → VALIDATED → OPENING → WAITING_FOR_READY → READY → SENDING_FRAME → [WAITING_FOR_FRAME_ACK] → FRAME_ACCEPTED → CLOSING → CLOSED`. PID 5302 omits the bracketed ACK state because captures prove no frame response. Any identity, mapping, response, timeout, stall, short I/O, disconnect, re-enumeration, OS error, duplicate input, or sequence failure transitions to `ERROR` or `ABORTED`, releases the handle best-effort, and performs no retry.
 
-Default conservative timeouts are centralized in `TimeoutPolicy`: open 2000 ms, readiness 1000 ms, each transfer 1000 ms, PID 5408 ACK 1000 ms, close 2000 ms, zero retries. `config/device-allowlist.json` records the same policy and remains `offline-only` with `live_send_authorized: false`.
+Default conservative timeouts are centralized in `TimeoutPolicy`: open 2000 ms, readiness 1000 ms, each transfer 1000 ms, PID 5408 ACK 1000 ms, close 2000 ms, zero retries. Public GUI definitions are immutable source data. Optional `config/device-allowlist.json` files remain supported as exact-machine overrides; CLI replay authorization remains separate and disabled by default.
 
 `validate-live-session` is read-only and never opens endpoints. `simulate-live-replay` uses only capture-derived responses and never touches USB hardware. Event logs omit frame payloads and record deterministic timestamps, state transitions, stable identity, endpoint, length, expected/actual response class, and abort reason.
 

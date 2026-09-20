@@ -24,9 +24,14 @@ echo Launching source module:
 echo   py -3.12 -m thermalright_lcd.gui
 echo.
 
-py -3.12 -m thermalright_lcd.gui
+py -3.12 -X faulthandler -m thermalright_lcd.gui
+set "ONI_EXIT_CODE=%ERRORLEVEL%"
 
 echo.
-echo Oni exited with errorlevel %errorlevel%.
+echo Oni exited with errorlevel %ONI_EXIT_CODE%.
+if not "%ONI_EXIT_CODE%"=="0" (
+  echo Startup failed. The Python traceback is shown above.
+  echo The persistent log is under: %LOCALAPPDATA%\OniThermalLcd\logs
+)
 pause
-endlocal
+endlocal & exit /b %ONI_EXIT_CODE%

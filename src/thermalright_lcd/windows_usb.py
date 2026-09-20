@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from copy import deepcopy
 import json
 import subprocess
 from .subprocess_utils import hidden_subprocess_kwargs
@@ -9,7 +10,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .live_state import (DeviceDisconnected, TransportError, TransportStall,
-                         TransportTimeout, DeviceIdentity)
+                         TransportTimeout, DeviceIdentity, SafetyError,
+                         expected_identity, validate_identity)
 
 
 ERROR_SEM_TIMEOUT=121; ERROR_GEN_FAILURE=31; ERROR_DEVICE_NOT_CONNECTED=1167
@@ -132,6 +134,26 @@ def discover_identity(target: dict) -> DeviceIdentity:
     return DeviceIdentity(target["vid_pid"],d["instance_id"],d.get("container_id"),target["interface"],
                           target["endpoint"],target["response_endpoint"],target["transfer_type"],
                           d.get("service") or "",generation,target.get("confirmed_device_path"),target["host_payload_size"])
+
+
+def materialize_reviewed_winusb_target(definition: dict) -> dict:
+    """Bind the reviewed 5408 definition to exactly one present WinUSB LCD."""
+    if definition.get("vid_pid") != "0416:5408":raise SafetyError("unsupported reviewed WinUSB definition")
+    script=("$ds=@(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^USB\\\\VID_0416&PID_5408\\\\' });"
+            "$items=@();foreach($d in $ds){$p=Get-PnpDeviceProperty -InstanceId $d.InstanceId;"
+            "$items+=@([ordered]@{status=$d.Status;instance_id=$d.InstanceId;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data;service=($p|? KeyName -eq 'DEVPKEY_Device_Service').Data})};"
+            "[ordered]@{count=$items.Count;items=$items}|ConvertTo-Json -Compress -Depth 4")
+    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
+    if cp.returncode:raise DeviceDisconnected("reviewed PID 5408 is not present")
+    result=json.loads(cp.stdout);items=result.get("items") or []
+    if isinstance(items,dict):items=[items]
+    if result.get("count")!=1:raise SafetyError(f"expected one reviewed PID 5408 device, found {result.get('count',0)}")
+    item=items[0]
+    if item.get("status")!="OK" or str(item.get("service","")).upper()!="WINUSB":raise SafetyError("PID 5408 requires an OK WinUSB device")
+    target=deepcopy(definition);sid=item["instance_id"];guid=target["interface_guid"]
+    target.update(stable_instance_id=sid,interface_instance_id=sid,container_id=str(item.get("container_id") or ""),confirmed_device_path="\\\\?\\"+sid.replace("\\","#")+"#"+guid)
+    if not target["container_id"] or not device_path_registered(target):raise SafetyError("PID 5408 reviewed interface path is not registered")
+    actual=discover_identity(target);validate_identity(actual,expected_identity(target));return target
 
 
 def device_path_registered(target: dict) -> bool:

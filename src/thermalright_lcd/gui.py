@@ -1001,6 +1001,7 @@ class DisplayCard(QFrame):
         for name,value in getattr(p,"media_by_type",{}).items():
             if name in {x.value for x in MediaKind} and value:self._media_paths[MediaKind(name)]=Path(value)
         if p.media_type in {x.value for x in MediaKind}:self.selected_media_kind=MediaKind(p.media_type);self.media_type_buttons[self.selected_media_kind].setChecked(True);self._update_media_controls()
+        if p.output_mode==OutputMode.MEDIA_WITH_SENSOR_OVERLAY.value and self.output_selector.findData(p.output_mode)<0:self.output_selector.addItem("Sensor + Media",p.output_mode)
         self.output_selector.setCurrentIndex(max(0,self.output_selector.findData(p.output_mode)));self.monitor_template.setCurrentText(p.sensor_template or self.monitor_template.currentText());self.preview_scale_slider.setValue(max(50,min(200,int(p.preview_scale))))
         if p.media:
             if Path(p.media).is_file():self.load(Path(p.media))
@@ -1438,12 +1439,13 @@ class MainWindow(QMainWindow):
 
     def open_monitor_designer(self):
         HardwareMonitorDesigner(self.settings, self.store, self).exec()
+        for card in (self.left,self.right):self._refresh_monitor_template_options(card)
 
     def open_theme_gallery(self):
         if not hasattr(self, "sensor_theme_editor"):
             editor_store = self._sensor_theme_store()
             live_values = lambda: self.monitor_service.poll() if hasattr(self, "monitor_service") else {}
-            self.sensor_theme_editor = SensorThemeEditorPage(editor_store, self, live_value_provider=live_values, apply_handler=self.apply_sensor_theme)
+            self.sensor_theme_editor = SensorThemeEditorPage(editor_store, self.pages, live_value_provider=live_values, apply_handler=self.apply_sensor_theme, deployment_handler=self.sensor_theme_document_changed)
             previous = self.pages.widget(2); self.pages.removeWidget(previous); previous.deleteLater()
             self.pages.insertWidget(2, self.sensor_theme_editor); self.sensor_theme_editor.attach_navigation_guard(self.pages)
             self._refresh_sensor_theme_editor_status()
@@ -1499,6 +1501,9 @@ class MainWindow(QMainWindow):
     def restore_desired_outputs(self):
         """Restore saved user intent after every card/provider is initialized."""
         for card in (self.left,self.right):
+            self._refresh_monitor_template_options(card)
+            saved_mode=self.settings.output_modes.get(card.device_id,card.output_selector.currentData() or OutputMode.STOPPED.value)
+            self._set_card_output_selection(card,saved_mode)
             if card.desired_playback_state!="Playing":
                 if card.desired_playback_state=="Paused":card._set_status("Paused","Saved paused state restored")
                 continue
@@ -1513,18 +1518,19 @@ class MainWindow(QMainWindow):
     def _resume_waiting_devices(self):
         for card in (self.left,self.right):
             if card.desired_playback_state!="Playing" or (card.hardware_sender.enabled and card.session.state!=SessionState.ERROR):continue
+            state=self._sensor_theme_runtime_state(card.device_id)
             card.reconnect()
             if not card.hardware_sender.enabled:continue
             mode=OutputMode(card.output_selector.currentData())
             if mode==OutputMode.HARDWARE_MONITOR:
-                state=self._sensor_theme_runtime_state(card.device_id)
-                if state:self._start_sensor_theme_output(card.device_id,state.theme,state.asset_root,state.fps,state.persisted_theme_id,save=False)
+                if state:
+                    card.session.set_refresh_interval(1/state.fps);card.hardware_started=True;state.next_frame_at=0;self._update_sensor_theme_timer();self.render_sensor_theme_outputs()
                 elif not self._restore_sensor_theme_output(card):self.start_monitor_layout(card.device_id,self._saved_monitor_layout(card))
             elif mode==OutputMode.MEDIA_WITH_SENSOR_OVERLAY and card.path:self.start_monitor_overlay(card.device_id,self._saved_monitor_layout(card))
 
     def _saved_monitor_layout(self,card):
         raw=self.settings.monitor_layouts.get(self.settings.active_profile,{}).get(card.device_id)
-        return MonitorLayout.from_dict(raw) if raw else deepcopy(templates(card.device_id)[card.monitor_template.currentText()])
+        return MonitorLayout.from_dict(raw) if raw else self._monitor_layout_by_name(card.device_id,card.monitor_template.currentText())
 
     def _sync_changed(self,enabled):
         self.sync_controller.set_enabled(enabled);self.settings.display_sync=bool(enabled);self.sync_toggle.setText(f"Display Sync  {'ON' if enabled else 'OFF'}")
@@ -1571,6 +1577,48 @@ class MainWindow(QMainWindow):
             store=SensorThemeStore(user_directory=self.base/"sensor-themes");self._live_sensor_theme_store=store
         return store
 
+    def _set_card_output_selection(self,card,mode):
+        value=OutputMode(mode).value;index=card.output_selector.findData(value)
+        if index<0 and value==OutputMode.MEDIA_WITH_SENSOR_OVERLAY.value:
+            card.output_selector.addItem("Sensor + Media",value);index=card.output_selector.findData(value)
+        if index>=0:
+            card.output_selector.blockSignals(True);card.output_selector.setCurrentIndex(index);card.output_selector.blockSignals(False)
+        for key,button in card.output_segments.items():button.setChecked(key==value)
+        card.update_output_controls()
+
+    def _monitor_layout_by_name(self,device_id,name):
+        raw=self.settings.monitor_layout_library.get(device_id,{}).get(name)
+        if raw:return MonitorLayout.from_dict(deepcopy(raw))
+        catalog=templates(device_id)
+        if name in catalog:return deepcopy(catalog[name])
+        active=self.settings.monitor_layouts.get(self.settings.active_profile,{}).get(device_id)
+        if active:return MonitorLayout.from_dict(deepcopy(active))
+        return deepcopy(next(iter(catalog.values())))
+
+    def _refresh_monitor_template_options(self,card):
+        selected=self.settings.monitor_templates.get(card.device_id,card.monitor_template.currentText())
+        names=sorted(set(templates(card.device_id))|set(self.settings.monitor_layout_library.get(card.device_id,{})))
+        active=self.settings.monitor_layouts.get(self.settings.active_profile,{}).get(card.device_id)
+        if active and active.get("name") and active.get("name")!="Custom" and active.get("name") not in names:names.append(active["name"]);names.sort()
+        card.monitor_template.blockSignals(True);card.monitor_template.clear();card.monitor_template.addItems(names)
+        if selected in names:card.monitor_template.setCurrentText(selected)
+        card.monitor_template.blockSignals(False)
+
+    def sensor_theme_document_changed(self,event,theme,asset_root,previous_id):
+        runtime=getattr(self,"sensor_theme_runtime",None);matching=[] if runtime is None else [device_id for device_id in runtime.active_device_ids if (state:=runtime.state(device_id)) and state.persisted_theme_id==previous_id]
+        if event=="saved" and theme is not None:
+            for device_id in matching:
+                state=runtime.state(device_id);self._start_sensor_theme_output(device_id,theme,asset_root,state.fps,theme.id,save=False)
+            for device_id,value in tuple(self.settings.sensor_theme_ids.items()):
+                if value==previous_id:self.settings.sensor_theme_ids[device_id]=theme.id
+            self.store.save(self.settings);self._refresh_sensor_theme_editor_status()
+            return f"Saved · active output refreshed on {len(matching)} display{'s' if len(matching)!=1 else ''}" if matching else "Saved · not currently deployed"
+        if event=="deleted":
+            self.store.save(self.settings)
+            for device_id in matching:self.card_by_id[device_id]._set_status("Sensor Theme",f"Deleted theme remains active until output changes · restart will stop safely")
+            return "Deleted · active output retained until changed" if matching else "Deleted"
+        return None
+
     def _ensure_sensor_theme_runtime(self):
         runtime=getattr(self,"sensor_theme_runtime",None)
         if runtime is None:
@@ -1614,9 +1662,7 @@ class MainWindow(QMainWindow):
         if not self.monitor_layouts_active:self.monitor_timer.stop()
         lease=self.set_output_mode(device_id,OutputMode.HARDWARE_MONITOR);self._sensor_theme_leases[device_id]=lease
         runtime.apply(device_id,theme,asset_root=asset_root,fps=fps,persisted_theme_id=persisted_theme_id)
-        card.output_selector.blockSignals(True);index=card.output_selector.findData(OutputMode.HARDWARE_MONITOR.value)
-        if index>=0:card.output_selector.setCurrentIndex(index)
-        card.output_selector.blockSignals(False);card.update_output_controls()
+        self._set_card_output_selection(card,OutputMode.HARDWARE_MONITOR)
         card.desired_playback_state="Playing";card.playing=True;card.hardware_started=bool(card.hardware_sender.enabled)
         card.session.set_refresh_interval(1/fps)
         self.settings.output_modes[device_id]=OutputMode.HARDWARE_MONITOR.value
@@ -1684,28 +1730,31 @@ class MainWindow(QMainWindow):
         self._update_sensor_theme_timer()
 
     def start_monitor_layout(self,device_id,layout):
-        self._stop_sensor_theme_output(device_id);self.settings.sensor_theme_ids.pop(device_id,None);card=self.card_by_id[device_id];self.set_output_mode(device_id,OutputMode.HARDWARE_MONITOR);card.playing=False;card.desired_playback_state="Playing";card.hardware_started=False;card._stop_scheduler();card.bridge.clear();self.monitor_layouts_active[device_id]=(layout,MonitorRenderer(layout),card._output_lease,OutputMode.HARDWARE_MONITOR);self.monitor_timer.start();self.render_monitor_layouts()
+        self._stop_sensor_theme_output(device_id);self.settings.sensor_theme_ids.pop(device_id,None);card=self.card_by_id[device_id];self.set_output_mode(device_id,OutputMode.HARDWARE_MONITOR);self._set_card_output_selection(card,OutputMode.HARDWARE_MONITOR);self.settings.output_modes[device_id]=OutputMode.HARDWARE_MONITOR.value;card.playing=False;card.desired_playback_state="Playing";card.hardware_started=False;card._stop_scheduler();card.bridge.clear();self.monitor_layouts_active[device_id]=(layout,MonitorRenderer(layout),card._output_lease,OutputMode.HARDWARE_MONITOR);self.store.save(self.settings);self.monitor_timer.start();self.render_monitor_layouts()
 
     def start_monitor_overlay(self,device_id,layout):
         card=self.card_by_id[device_id]
         if not card.path:card._set_status("Choose media before enabling sensor overlay");return False
-        self.set_output_mode(device_id,OutputMode.MEDIA_WITH_SENSOR_OVERLAY);self.monitor_layouts_active[device_id]=(layout,MonitorRenderer(layout),card._output_lease,OutputMode.MEDIA_WITH_SENSOR_OVERLAY);self.monitor_timer.start();self.render_monitor_layouts();card.play(coordinated=True);return True
+        self.set_output_mode(device_id,OutputMode.MEDIA_WITH_SENSOR_OVERLAY);self._set_card_output_selection(card,OutputMode.MEDIA_WITH_SENSOR_OVERLAY);self.settings.output_modes[device_id]=OutputMode.MEDIA_WITH_SENSOR_OVERLAY.value;card.desired_playback_state="Playing";self.monitor_layouts_active[device_id]=(layout,MonitorRenderer(layout),card._output_lease,OutputMode.MEDIA_WITH_SENSOR_OVERLAY);self.store.save(self.settings);self.monitor_timer.start();self.render_monitor_layouts();card.play(coordinated=True);return True
 
     def _output_selection_changed(self,card):
         mode=OutputMode(card.output_selector.currentData())
         card.update_output_controls()
+        if not hasattr(self,"monitor_layouts_active"):return
         self.settings.output_modes[card.device_id]=mode.value;self.settings.monitor_templates[card.device_id]=card.monitor_template.currentText()
         if mode==OutputMode.HARDWARE_MONITOR:
-            if not self._restore_sensor_theme_output(card):self.start_monitor_layout(card.device_id,templates(card.device_id)[card.monitor_template.currentText()])
-        elif mode==OutputMode.MEDIA_WITH_SENSOR_OVERLAY:self.start_monitor_overlay(card.device_id,templates(card.device_id)[card.monitor_template.currentText()])
+            if not self._restore_sensor_theme_output(card):self.start_monitor_layout(card.device_id,self._monitor_layout_by_name(card.device_id,card.monitor_template.currentText()))
+        elif mode==OutputMode.MEDIA_WITH_SENSOR_OVERLAY:self.start_monitor_overlay(card.device_id,self._monitor_layout_by_name(card.device_id,card.monitor_template.currentText()))
         elif mode==OutputMode.MEDIA:
             self.set_output_mode(card.device_id,mode)
             if card.path:card.play(coordinated=True)
         else:card.stop(coordinated=True)
 
     def _monitor_template_changed(self,card):
+        if not hasattr(self,"monitor_layouts_active"):return
+        self.settings.sensor_theme_ids.pop(card.device_id,None);self._stop_sensor_theme_output(card.device_id)
         if card.output_selector.currentData() in {OutputMode.HARDWARE_MONITOR.value,OutputMode.MEDIA_WITH_SENSOR_OVERLAY.value}:self._output_selection_changed(card)
-        if card.quick_edit.isChecked():self.set_home_edit_mode(card,True,deepcopy(templates(card.device_id)[card.monitor_template.currentText()]))
+        if card.quick_edit.isChecked():self.set_home_edit_mode(card,True,self._monitor_layout_by_name(card.device_id,card.monitor_template.currentText()))
 
     def set_home_edit_mode(self,card,enabled,layout_override=None):
         existing=getattr(card,"home_quick_editor",None)
@@ -1729,7 +1778,7 @@ class MainWindow(QMainWindow):
         if editor and not save_as:editor.mark_saved()
 
     def _reset_home_layout(self,card):
-        layout=deepcopy(templates(card.device_id)[card.monitor_template.currentText()])
+        layout=self._monitor_layout_by_name(card.device_id,card.monitor_template.currentText())
         self._home_layout_changed(card,layout);self.set_home_edit_mode(card,True,layout)
 
     def _home_layout_changed(self,card,layout):
@@ -1739,7 +1788,7 @@ class MainWindow(QMainWindow):
             _,_,lease,mode=active;self.monitor_layouts_active[card.device_id]=(layout,MonitorRenderer(layout),lease,mode);self.render_monitor_layouts()
 
     def stop_monitor_layout(self,device_id):
-        self.monitor_layouts_active.pop(device_id,None);card=self.card_by_id[device_id];card.playing=False;card.hardware_started=False;card.session.stop();card._output_lease=card.output_ownership.transition(OutputMode.STOPPED);card._set_status("Monitor stopped")
+        self._stop_sensor_theme_output(device_id);self.monitor_layouts_active.pop(device_id,None);card=self.card_by_id[device_id];card.playing=False;card.desired_playback_state="Stopped";card.hardware_started=False;card.session.stop();card._output_lease=card.output_ownership.transition(OutputMode.STOPPED);self._set_card_output_selection(card,OutputMode.STOPPED);self.settings.output_modes[device_id]=OutputMode.STOPPED.value;self.store.save(self.settings);card._set_status("Monitor stopped")
         if not self.monitor_layouts_active:self.monitor_timer.stop()
 
     def set_output_mode(self,device_id,mode,stop_previous=True):
@@ -1802,6 +1851,10 @@ class MainWindow(QMainWindow):
     def rescan_sensors(self):
         if not hasattr(self,"monitor_service"):return
         self.semantic_resolver=SemanticResolverCache();self._monitor_value_keys.clear();self.monitor_service.rescan();self.refresh_sensor_diagnostics();self.render_monitor_layouts()
+        runtime=getattr(self,"sensor_theme_runtime",None)
+        if runtime:
+            for device_id in runtime.active_device_ids:runtime.state(device_id).next_frame_at=0
+            self.render_sensor_theme_outputs()
 
     def refresh_sensor_diagnostics(self):
         if not hasattr(self,"monitor_service") or not hasattr(self,"sensor_diagnostic_summary"):return
@@ -2331,6 +2384,8 @@ def main():
         splash.close()
         import logging
         logging.getLogger("thermalright_lcd.gui").exception("GUI startup failed")
+        import traceback
+        traceback.print_exc()
         return 1
     w.show();app.processEvents();splash.finish(w)
     instance.activationRequested.connect(w.restore_window);app.aboutToQuit.connect(w.shutdown)

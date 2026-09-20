@@ -13,14 +13,12 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue(any(isinstance(node, ast.If) for node in tree.body))
         self.assertIn("freeze_support()", source)
 
-    def test_spec_includes_runtime_safety_data(self):
+    def test_spec_uses_public_reviewed_device_definitions(self):
         source = (ROOT / "packaging/oni_thermal_lcd.spec").read_text(encoding="utf-8")
-        for required in (
-            "device-allowlist.json", "session-report.json",
-            "pid5408-new-session-first-frame.json",
-            "pid5302-same-session-first-frame.json",
-        ):
-            self.assertIn(required, source)
+        reviewed = (ROOT / "src/thermalright_lcd/reviewed_devices.py").read_text(encoding="utf-8")
+        for private_name in ("device-allowlist.json", "session-report.json", "pid5408-new-session-first-frame.json", "pid5302-same-session-first-frame.json"):
+            self.assertNotIn(private_name, source)
+        self.assertIn('"0416:5408"', reviewed); self.assertIn('"0416:5302"', reviewed)
         self.assertIn('console=False', source)
         self.assertIn('ERROR_PROC_NOT_FOUND', source)
         self.assertIn('"ICUUC.DLL", "ICUDT78.DLL"', source)

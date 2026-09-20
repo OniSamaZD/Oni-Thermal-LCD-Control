@@ -58,7 +58,7 @@ The project currently still has several important bugs and incomplete workflows:
 - Hardware Monitor customization does not yet expose every supported property consistently.
 - Saved Hardware Monitor layouts still need the complete **Save -> Home -> Select -> Play/Apply -> LCD** workflow.
 - Theme/layout rename, delete, refresh, restart restore, and dual-display deployment still need more validation.
-- Public device onboarding is not finished, so LCD output may stay blocked on a new machine.
+- Public onboarding is built in for the reviewed `0416:5408` and `0416:5302` definitions.
 - There is no public stable EXE/installer release yet.
 
 If you find a bug, **please report it**. Reproducible reports help a lot. I will review reports and fix what I can as time allows.
@@ -139,25 +139,11 @@ $env:PYTHONPATH = "src"
 py -3.12 -m thermalright_lcd.gui
 ```
 
-## Important hardware / authorization note
+## Hardware authorization and onboarding
 
-The public repository intentionally does **not** include machine-specific device authorization records.
+The reviewed public definitions for `0416:5408` and `0416:5302` are built into the source. On Windows, Oni discovers the connected instance read-only and validates its exact driver, interface, endpoints or HID report capabilities, container identity, readiness response, and encoded frame before output. No private allowlist or manual JSON editing is required.
 
-The local file:
-
-```text
-config/device-allowlist.json
-```
-
-is excluded from GitHub. The repository only includes:
-
-```text
-config/device-allowlist.example.json
-```
-
-So a new user may be able to open and test the UI while physical LCD output remains blocked.
-
-**Do not disable or bypass the safety checks.** A simpler public device-enrollment/configuration flow is still being developed.
+Legacy `config/device-allowlist.json` files remain compatible as optional exact-machine overrides. Unknown devices, ambiguous matches, incompatible transports, and invalid readiness responses remain blocked. Do not copy another machine's legacy authorization file or disable the safety checks.
 
 ## Sensor Themes
 

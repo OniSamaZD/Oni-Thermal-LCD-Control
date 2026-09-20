@@ -9,9 +9,9 @@ Windows version resource, and places third-party notices beside the executable.
 It does not install, replace, or configure any USB driver. USBPcap, Wireshark,
 TRCC, and a system Python are not runtime dependencies.
 
-The executable carries the exact local device allowlist, the capture-derived
-session lifecycle, one confirmed transaction model per LCD, the project license,
-and ONI icon assets. Captures, diagnostic reports, test media, logs, and
+The executable carries the reviewed public device and lifecycle definitions in
+the application source, plus the project license and ONI icon assets. Private
+machine allowlists, captures, diagnostic reports, test media, logs, and
 developer tools are not bundled.
 
 An initial prototype failed before application startup with QtCore
@@ -117,15 +117,14 @@ profiles under `%LOCALAPPDATA%\OniThermalLcd`.
 
 `packaging/smoke-installer.ps1` performs a temporary current-user acceptance
 test covering install, both shortcuts, installed launch, uninstall, shortcut
-cleanup, and settings preservation. The local release artifact contains the
-reviewed machine-specific authorization data required by the fail-closed
-transport; those identifiers must not be published in a public source release
-without a separate evidence and privacy review.
+cleanup, and settings preservation. The release uses public reviewed transport
+definitions and discovers the current machine's instance/container/path
+read-only at runtime. Machine-specific identifiers are not published or required.
 
 ## Safe validation
 
 The build smoke test is intentionally short and interaction-free. It validates
-that Qt plugins, image codecs, capture-derived runtime data, settings/log paths,
+that Qt plugins, image codecs, reviewed runtime definitions, settings/log paths,
 and the frozen entry point initialize, then requests a clean application exit.
 It is not a physical playback test and cannot prove USB behavior. A normal EXE
 launch likewise does not open either LCD; device handles are opened only after

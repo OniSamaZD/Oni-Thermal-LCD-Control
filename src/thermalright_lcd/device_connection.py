@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import threading,time
+import json,threading,time
 from collections import deque
 import sys
 from pathlib import Path
@@ -10,6 +10,7 @@ from .live_state import (RealUsbTransport, SafetyError, TimeoutPolicy, Transport
                          expected_identity, load_allowlist, load_sequence,
                          validate_identity, validate_ready)
 from .capabilities import capabilities
+from .reviewed_devices import REVIEWED_DEVICE_DEFINITIONS, reviewed_device_definition, reviewed_lifecycle
 
 
 class DisabledHardwareSender:
@@ -81,7 +82,7 @@ class GeneratedFrameConnection:
                 if n != len(self.lifecycle["init"]):
                     raise TransportError("short initialization write")
                 ready = self.transport.read(self.identity.in_endpoint, len(self.lifecycle["ready"]), self.timeouts.readiness_ms)
-                validate_ready(self.identity.vid_pid, ready, self.lifecycle["ready"])
+                validate_ready(self.identity.vid_pid, ready, self.lifecycle["ready"], validation=self.lifecycle.get("ready_validation", "exact"))
                 self._trace("readiness_validated",bytes=len(ready))
                 if self.transport.pending_input():
                     raise TransportError("unexpected response before generated frame")
@@ -158,16 +159,41 @@ def application_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _legacy_gui_configuration(root: Path, device_id: str):
+    """Load an existing exact-machine authorization when it is complete."""
+    path = root / "config/device-allowlist.json"
+    if not path.is_file(): return None
+    try:
+        allow = load_allowlist(path)
+        target = next((item for item in allow["devices"] if item.get("vid_pid") == device_id), None)
+        if target is None:return None
+        if not target.get("allowGuiGeneratedMedia", False):return (None, None, "local-deny")
+        tx = (root / "analysis/pid5408-new-session-first-frame.json" if device_id == "0416:5408"
+              else root / "analysis/pid5302-same-session-first-frame.json")
+        lifecycle = load_sequence(root / "analysis/session-report.json", tx, device_id, 1, require_same_session=True)
+        return target, lifecycle, "legacy-exact"
+    except (OSError, KeyError, ValueError, json.JSONDecodeError):return None
+
+
+def _public_gui_configuration(device_id: str):
+    target = reviewed_device_definition(device_id)
+    if target.get("access_method") == "windows-hid":
+        from .windows_hid import materialize_reviewed_hid_target
+        target = materialize_reviewed_hid_target(target)
+    else:
+        from .windows_usb import materialize_reviewed_winusb_target
+        target = materialize_reviewed_winusb_target(target)
+    return target, reviewed_lifecycle(device_id), "public-reviewed"
+
+
 def build_gui_sender(device_id: str, root: Path | None = None):
-    """Build the real GUI sender only when its separate explicit gate is true."""
+    """Build one validated sender for a reviewed public device definition."""
     root = root or application_root()
-    allow = load_allowlist(root / "config/device-allowlist.json")
-    target = next(x for x in allow["devices"] if x["vid_pid"] == device_id)
-    if not target.get("allowGuiGeneratedMedia", False):
-        return DisabledHardwareSender()
-    tx = (root / "analysis/pid5408-new-session-first-frame.json" if device_id == "0416:5408"
-          else root / "analysis/pid5302-same-session-first-frame.json")
-    lifecycle = load_sequence(root / "analysis/session-report.json", tx, device_id, 1, require_same_session=True)
+    if device_id not in REVIEWED_DEVICE_DEFINITIONS:return DisabledHardwareSender(f"Unsupported device definition: {device_id}")
+    legacy = _legacy_gui_configuration(root, device_id)
+    if legacy and legacy[2] == "local-deny":return DisabledHardwareSender("Hardware control disabled by local configuration")
+    try:target, lifecycle, _source = legacy or _public_gui_configuration(device_id)
+    except Exception as exc:return DisabledHardwareSender(f"Reviewed device unavailable or incompatible: {exc}")
     seconds = int(target.get("guiSessionMaxSeconds", 3600))
     max_frame_writes = int(target.get("guiMaxFrameWrites", 4096))
     fps = 6 if device_id == "0416:5408" else 12

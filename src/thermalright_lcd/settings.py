@@ -26,6 +26,7 @@ class AppSettings:
     sensor_favorites:list[str]=field(default_factory=list)
     recent_sensors:list[str]=field(default_factory=list)
     monitor_layouts:dict[str,dict[str,dict]]=field(default_factory=dict)
+    monitor_layout_library:dict[str,dict[str,dict]]=field(default_factory=dict)
     designer_geometry:list[int]=field(default_factory=list)
     window_geometry:list[int]=field(default_factory=list)
     window_maximized:bool=False
@@ -48,6 +49,9 @@ class AppSettings:
 class SettingsStore:
     def __init__(self,path:Path):self.path=Path(path)
     def load(self)->AppSettings:
+        try:return self._load()
+        except (OSError,UnicodeError,json.JSONDecodeError,TypeError,ValueError,AttributeError):return AppSettings()
+    def _load(self)->AppSettings:
         if not self.path.exists():return AppSettings()
         raw=json.loads(self.path.read_text(encoding="utf-8"));profiles={}
         for name,devices in raw.get("profiles",{}).items():
@@ -59,7 +63,7 @@ class SettingsStore:
         known={k:raw.get(k,getattr(AppSettings(),k)) for k in (
             "start_minimized","close_to_tray","close_button_behavior","start_with_windows","minimize_to_tray",
             "restore_previous_media","auto_reconnect","remember_window_position","default_fps","default_display_mode","stale_frame_dropping",
-            "resume_playback","hardware_decode","performance_mode","sensor_interval_ms","last_media_directory","media_library","sensor_favorites","recent_sensors","monitor_layouts","designer_geometry","window_geometry","window_maximized","sidebar_expanded","display_layout","display_order","splitter_sizes","preview_scales","advanced_expanded","active_profile","display_sync","unified_sync_view","link_brightness","output_modes","monitor_templates","sensor_theme_ids","sensor_theme_fps")}
+            "resume_playback","hardware_decode","performance_mode","sensor_interval_ms","last_media_directory","media_library","sensor_favorites","recent_sensors","monitor_layouts","monitor_layout_library","designer_geometry","window_geometry","window_maximized","sidebar_expanded","display_layout","display_order","splitter_sizes","preview_scales","advanced_expanded","active_profile","display_sync","unified_sync_view","link_brightness","output_modes","monitor_templates","sensor_theme_ids","sensor_theme_fps")}
         if known["display_layout"] not in {"side_by_side","stacked"}:known["display_layout"]="stacked"
         if sorted(known["display_order"])!=["0416:5302","0416:5408"]:known["display_order"]=["0416:5408","0416:5302"]
         # Old builds persisted the former false-by-default checkbox even when

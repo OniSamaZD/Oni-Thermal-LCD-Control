@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFormLayout, QFrame, QGraphicsItem, QGraphicsRectItem,
     QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QFileDialog,
+    QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QFileDialog, QInputDialog,
     QSplitter, QToolBox, QVBoxLayout, QWidget, QColorDialog, QFontComboBox,
     QToolButton, QMenu,
 )
@@ -234,8 +234,8 @@ class PropertiesPanel(QScrollArea):
     def _apply_relevance(self,kind):
         sensor_kinds={"text value","label + value","horizontal bar","vertical bar","gauge","line graph","sparkline","percentage","icon + value"};text_kinds={"text value","label + value","percentage","icon + value","static label","clock","date"};range_kinds={"horizontal bar","vertical bar","gauge","line graph","sparkline","percentage"}
         visibility={
-            "text":kind in {"static label"},"sensor_id":kind in sensor_kinds,"provider":kind in sensor_kinds,"custom_label":kind in sensor_kinds,"format_string":kind in sensor_kinds,"unit":kind in sensor_kinds,"decimals":kind in sensor_kinds,"prefix":kind in sensor_kinds,"suffix":kind in sensor_kinds,
-            "font_family":kind in text_kinds,"font_size":kind in text_kinds,"font_weight":kind in text_kinds,"bold":kind in text_kinds,"text_style":kind in text_kinds,"align":kind in text_kinds,"vertical_align":kind in text_kinds,"minimum":kind in range_kinds,"maximum":kind in range_kinds,"image":kind in {"image","icon + value"},"rotation":kind in {"image","static label"},"brightness":kind=="image","preserve_aspect":kind=="image","outline_color":kind in text_kinds,"outline_width":kind in text_kinds,"shadow_color":kind in text_kinds,"shadow_offset":kind in text_kinds,
+            "text":kind in {"static label"},"sensor_id":kind in sensor_kinds,"provider":kind in sensor_kinds,"custom_label":kind in sensor_kinds,"format_string":kind in sensor_kinds|{"clock","date"},"unit":kind in sensor_kinds,"decimals":kind in sensor_kinds,"prefix":kind in sensor_kinds,"suffix":kind in sensor_kinds,
+            "font_family":kind in text_kinds,"font_size":kind in text_kinds,"font_weight":kind in text_kinds,"bold":kind in text_kinds,"text_style":kind in text_kinds,"align":kind in text_kinds,"vertical_align":kind in text_kinds,"minimum":kind in range_kinds,"maximum":kind in range_kinds,"image":kind in {"image","icon + value"},"rotation":kind=="image","brightness":kind=="image","preserve_aspect":kind=="image","outline_color":kind in text_kinds,"outline_width":kind in text_kinds,"shadow_color":kind in text_kinds,"shadow_offset":kind in text_kinds,
         }
         for name,shown in visibility.items():
             widget=self.controls[name];widget.setVisible(shown);label=next((form.labelForField(widget) for form in self.forms.values() if form.labelForField(widget)),None)
@@ -321,15 +321,15 @@ class HardwareMonitorDesigner(QDialog):
         super().__init__(parent);self.settings=settings;self.store=store;self.setWindowTitle("Hardware Monitor Designer");self.resize(1450,880)
         if len(settings.designer_geometry)==4:self.setGeometry(*settings.designer_geometry)
         self.current_target="0416:5408";self.current_profile=settings.active_profile;self.layout=None;self.template_previewing=False
-        root=QVBoxLayout(self);top=QHBoxLayout();self.target=QComboBox();self.target.addItem('9.16" LCD',"0416:5408");self.target.addItem('6" LCD',"0416:5302");self.profile=QComboBox();self.profile.addItems(settings.profiles.keys());self.profile.setCurrentText(self.current_profile);self.template=QComboBox();self.template.addItems(["Custom",*templates(self.current_target).keys()]);load_template=QPushButton("Load template as editable");blank=QPushButton("New blank");save=QPushButton("Save layout");top.addWidget(QLabel("LCD"));top.addWidget(self.target);top.addWidget(QLabel("Profile"));top.addWidget(self.profile);top.addWidget(QLabel("Shortcut"));top.addWidget(self.template);top.addWidget(load_template);top.addWidget(blank);top.addStretch();top.addWidget(save);root.addLayout(top)
+        root=QVBoxLayout(self);top=QHBoxLayout();self.target=QComboBox();self.target.addItem('9.16" LCD',"0416:5408");self.target.addItem('6" LCD',"0416:5302");self.profile=QComboBox();self.profile.addItems(settings.profiles.keys());self.profile.setCurrentText(self.current_profile);self.template=QComboBox();self.layout_name=QLineEdit("Custom");self.layout_name.setMaximumWidth(180);load_template=QPushButton("Load template as editable");blank=QPushButton("New blank");save=QPushButton("Save layout");rename=QPushButton("Rename");remove=QPushButton("Delete");refresh=QPushButton("Refresh");top.addWidget(QLabel("LCD"));top.addWidget(self.target);top.addWidget(QLabel("Profile"));top.addWidget(self.profile);top.addWidget(QLabel("Layout"));top.addWidget(self.template);top.addWidget(self.layout_name);top.addWidget(load_template);top.addWidget(blank);top.addWidget(rename);top.addWidget(remove);top.addWidget(refresh);top.addStretch();top.addWidget(save);root.addLayout(top)
         toolbar=QHBoxLayout();add=QToolButton();add.setText("＋ Add Element");add.setPopupMode(QToolButton.InstantPopup);add_menu=QMenu(add)
         for label,callback in (("Sensor value",self.add_element),("Text",self.add_text),("Image / logo",self.add_image),("Bar",lambda:self.add_kind("horizontal bar")),("Gauge",lambda:self.add_kind("gauge")),("Graph",lambda:self.add_kind("line graph")),("Clock",lambda:self.add_kind("clock")),("Date",lambda:self.add_kind("date"))):add_menu.addAction(label).triggered.connect(callback)
         add.setMenu(add_menu);toolbar.addWidget(add);actions=(("Background",self.choose_background),("Reset background",self.reset_background),("Duplicate",self.duplicate),("Delete",self.delete),("Lock / Unlock",self.toggle_lock),("Group",self.group),("Ungroup",self.ungroup),("Bring forward",lambda:self.change_z(1)),("Send backward",lambda:self.change_z(-1)))
         for label,callback in actions:b=QPushButton(label);b.clicked.connect(callback);toolbar.addWidget(b)
         self.snap=QCheckBox("Snap to grid");self.guides=QCheckBox("Alignment guides");self.grid=QSpinBox();self.grid.setRange(1,100);toolbar.addWidget(self.snap);toolbar.addWidget(QLabel("Grid"));toolbar.addWidget(self.grid);toolbar.addWidget(self.guides);toolbar.addStretch();root.addLayout(toolbar)
         self.splitter=QSplitter();root.addWidget(self.splitter,1);self.layers=QListWidget();self.layers.setMinimumWidth(190);self.layers.setMaximumWidth(260);self.layers.setToolTip("Layers · check to show/hide; click to select; use Lock, Delete and z-order tools above");self.splitter.addWidget(self.layers);canvas_holder=QWidget();cv=QVBoxLayout(canvas_holder);self.scene=None;self.canvas=None;self.splitter.addWidget(canvas_holder);self.properties=PropertiesPanel();self.splitter.addWidget(self.properties);self.splitter.setSizes([210,820,360]);self.canvas_layout=cv;self.layers.itemClicked.connect(self.select_layer);self.layers.itemChanged.connect(self.layer_visibility_changed)
-        self.browser=SensorBrowser(settings.sensor_favorites,settings.recent_sensors);root.addWidget(self.browser);runtime=QHBoxLayout();play=QPushButton("Play layout on selected LCD");stop=QPushButton("Stop monitor output");runtime.addWidget(play);runtime.addWidget(stop);runtime.addStretch();root.addLayout(runtime);buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Close);buttons.accepted.connect(self.save);buttons.rejected.connect(self.reject);root.addWidget(buttons);play.clicked.connect(self.play_on_lcd);stop.clicked.connect(self.stop_on_lcd)
-        self.target.currentIndexChanged.connect(self.switch_target);self.profile.currentTextChanged.connect(self.switch_profile);self.template.currentTextChanged.connect(self.preview_template);load_template.clicked.connect(self.load_template);blank.clicked.connect(self.new_blank);save.clicked.connect(self.save);self.snap.toggled.connect(self.canvas_options);self.guides.toggled.connect(self.canvas_options);self.grid.valueChanged.connect(self.canvas_options);self.properties.changed.connect(self.property_changed);self.browser.sensorChosen.connect(self.use_sensor);self.browser.bindingRequested.connect(self.bind_formula_alias);self.browser.favoritesChanged.connect(lambda:self.store.save(self.settings));self.browser.snapshotUpdated.connect(self.sensor_snapshot);self.load_layout()
+        self.browser=SensorBrowser(settings.sensor_favorites,settings.recent_sensors);root.addWidget(self.browser);runtime=QHBoxLayout();play=QPushButton("Play layout on selected LCD");overlay=QPushButton("Overlay on existing media");stop=QPushButton("Stop monitor output");runtime.addWidget(play);runtime.addWidget(overlay);runtime.addWidget(stop);runtime.addStretch();root.addLayout(runtime);buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Close);buttons.accepted.connect(self.save);buttons.rejected.connect(self.reject);root.addWidget(buttons);play.clicked.connect(self.play_on_lcd);overlay.clicked.connect(self.overlay_on_lcd);stop.clicked.connect(self.stop_on_lcd)
+        self.target.currentIndexChanged.connect(self.switch_target);self.profile.currentTextChanged.connect(self.switch_profile);self.template.currentTextChanged.connect(self.preview_template);load_template.clicked.connect(self.load_template);blank.clicked.connect(self.new_blank);save.clicked.connect(self.save);rename.clicked.connect(self.rename_layout);remove.clicked.connect(self.delete_layout);refresh.clicked.connect(self.refresh_layout_choices);self.snap.toggled.connect(self.canvas_options);self.guides.toggled.connect(self.canvas_options);self.grid.valueChanged.connect(self.canvas_options);self.properties.changed.connect(self.property_changed);self.browser.sensorChosen.connect(self.use_sensor);self.browser.bindingRequested.connect(self.bind_formula_alias);self.browser.favoritesChanged.connect(lambda:self.store.save(self.settings));self.browser.snapshotUpdated.connect(self.sensor_snapshot);self.refresh_layout_choices();self.load_layout()
     def sensor_snapshot(self,snapshot):
         values={value.definition.qualified_id:value.value for value in snapshot.values}
         roles={"cpu.usage":"cpu_usage","cpu.temperature":"cpu_temp","cpu.clock":"cpu_clock","cpu.power":"cpu_power","gpu.usage":"gpu_usage","gpu.temperature":"gpu_temp","gpu.hotspot":"gpu_hotspot","gpu.clock":"gpu_clock","gpu.memory_clock":"gpu_memory_clock","gpu.power":"gpu_power","gpu.memory_used":"vram_usage","memory.usage":"ram_usage","storage.temperature":"ssd_temp","network.download":"network_download","network.upload":"network_upload","game.fps":"fps","game.frametime":"frametime","fan.rpm":"fan_rpm","pump.rpm":"pump_rpm"}
@@ -337,8 +337,13 @@ class HardwareMonitorDesigner(QDialog):
             resolved=resolve_semantic_sensor(alias,snapshot.values);values[semantic]=resolved.value if resolved else None
         self.scene.set_live_values(values)
     def play_on_lcd(self):
-        self.save_current();owner=self.parent()
+        if not self.save():return
+        owner=self.parent()
         if owner and hasattr(owner,"start_monitor_layout"):owner.start_monitor_layout(self.current_target,deepcopy(self.layout))
+    def overlay_on_lcd(self):
+        if not self.save():return
+        owner=self.parent()
+        if owner and hasattr(owner,"start_monitor_overlay"):owner.start_monitor_overlay(self.current_target,deepcopy(self.layout))
     def stop_on_lcd(self):
         owner=self.parent()
         if owner and hasattr(owner,"stop_monitor_layout"):owner.stop_monitor_layout(self.current_target)
@@ -346,26 +351,69 @@ class HardwareMonitorDesigner(QDialog):
     def load_layout(self):
         self.template_previewing=False
         raw=self.saved_raw();self.layout=MonitorLayout.from_dict(raw) if raw else MonitorLayout("Custom",self.current_target,1920 if self.current_target.endswith("5408") else 1280,462 if self.current_target.endswith("5408") else 480)
+        self.layout_name.setText(self.layout.name)
         if self.canvas:self.canvas_layout.removeWidget(self.canvas);self.canvas.deleteLater()
         self.scene=DesignerScene(self.layout,self);self.canvas=CanvasView(self.scene);self.canvas_layout.addWidget(self.canvas);self.scene.elementSelected.connect(self.select_element);self.scene.changed.connect(self.canvas_changed);self.scene.deleteRequested.connect(self.delete);self.scene.duplicateRequested.connect(self.duplicate);self.snap.setChecked(self.layout.snap_to_grid);self.guides.setChecked(self.layout.alignment_guides);self.grid.setValue(self.layout.grid_size);self.refresh_layers()
     def save_current(self):
         if not self.template_previewing:self.settings.monitor_layouts.setdefault(self.current_profile,{})[self.current_target]=self.layout.to_dict()
-    def save(self):self.save_current();self.store.save(self.settings)
+    def layout_library(self):return self.settings.monitor_layout_library.setdefault(self.current_target,{})
+    def refresh_layout_choices(self,selected=None):
+        selected=selected or self.template.currentText() or "Custom";names=["Custom",*sorted(templates(self.current_target)),*sorted(name for name in self.layout_library() if name not in templates(self.current_target))]
+        self.template.blockSignals(True);self.template.clear();self.template.addItems(names);self.template.setCurrentText(selected if selected in names else "Custom");self.template.blockSignals(False)
+        owner=self.parent()
+        if owner and hasattr(owner,"_refresh_monitor_template_options"):
+            for card in owner.card_by_id.values():owner._refresh_monitor_template_options(card)
+    def save(self):
+        entered=self.layout_name.text().strip();name=self.layout.name.strip() if entered in {"","Custom"} and self.layout.name.strip() not in {"","Custom"} else entered or self.layout.name.strip()
+        if not name or name=="Custom":
+            name,ok=QInputDialog.getText(self,"Save monitor layout","Layout name:",text="My Monitor Layout")
+            if not ok or not name.strip():return False
+            name=name.strip()
+        if name in templates(self.current_target):QMessageBox.warning(self,"Reserved layout name","Choose a name different from the built-in layouts.");return False
+        self.template_previewing=False;self.layout.name=name;raw=self.layout.to_dict();self.layout_library()[name]=deepcopy(raw);self.settings.monitor_layouts.setdefault(self.current_profile,{})[self.current_target]=deepcopy(raw);self.settings.monitor_templates[self.current_target]=name;self.store.save(self.settings);self.layout_name.setText(name);self.refresh_layout_choices(name);return True
+    def rename_layout(self):
+        old=self.layout.name
+        if old not in self.layout_library():QMessageBox.information(self,"User layout required","Select or save a user layout before renaming it.");return False
+        name,ok=QInputDialog.getText(self,"Rename monitor layout","Layout name:",text=old)
+        if not ok or not name.strip() or name.strip()==old:return False
+        name=name.strip()
+        if name in templates(self.current_target) or name in self.layout_library():QMessageBox.warning(self,"Name already used","Choose a unique user layout name.");return False
+        raw=self.layout_library().pop(old);raw["name"]=name;self.layout_library()[name]=raw;self.layout.name=name;self.layout_name.setText(name)
+        for profile_layouts in self.settings.monitor_layouts.values():
+            active=profile_layouts.get(self.current_target)
+            if active and active.get("name")==old:profile_layouts[self.current_target]=deepcopy(raw)
+        if self.settings.monitor_templates.get(self.current_target)==old:self.settings.monitor_templates[self.current_target]=name
+        self.store.save(self.settings);self.refresh_layout_choices(name);return True
+    def delete_layout(self):
+        name=self.layout.name
+        if name not in self.layout_library():QMessageBox.information(self,"User layout required","Only saved user layouts can be deleted.");return False
+        if QMessageBox.question(self,"Delete monitor layout",f"Delete '{name}'?",QMessageBox.Yes|QMessageBox.No)!=QMessageBox.Yes:return False
+        self.layout_library().pop(name,None)
+        for profile_layouts in self.settings.monitor_layouts.values():
+            active=profile_layouts.get(self.current_target)
+            if active and active.get("name")==name:profile_layouts[self.current_target]=MonitorLayout("Custom",self.current_target,1920 if self.current_target.endswith("5408") else 1280,462 if self.current_target.endswith("5408") else 480).to_dict()
+        if self.settings.monitor_templates.get(self.current_target)==name:self.settings.monitor_templates.pop(self.current_target,None)
+        self.store.save(self.settings);self.refresh_layout_choices("Custom");self.load_layout();return True
     def done(self,result):
         geometry=self.normalGeometry();self.settings.designer_geometry=[geometry.x(),geometry.y(),geometry.width(),geometry.height()];self.save_current();self.store.save(self.settings);super().done(result)
-    def switch_target(self):self.save_current();self.current_target=self.target.currentData();self.template.blockSignals(True);self.template.clear();self.template.addItems(["Custom",*templates(self.current_target).keys()]);self.template.blockSignals(False);self.load_layout()
+    def switch_target(self):self.save_current();self.current_target=self.target.currentData();self.refresh_layout_choices();self.load_layout()
     def switch_profile(self,name):self.save_current();self.current_profile=name;self.load_layout()
     def new_blank(self):
         if QMessageBox.question(self,"New blank layout","Replace the current canvas with a blank editable layout?")!=QMessageBox.Yes:return
-        self.template_previewing=False;self.layout=MonitorLayout("Custom",self.current_target,1920 if self.current_target.endswith("5408") else 1280,462 if self.current_target.endswith("5408") else 480);self.load_scene()
+        self.template_previewing=False;self.layout=MonitorLayout("Custom",self.current_target,1920 if self.current_target.endswith("5408") else 1280,462 if self.current_target.endswith("5408") else 480);self.layout_name.setText("Custom");self.load_scene()
     def preview_template(self,name):
         if name=="Custom":self.load_layout();return
+        user=self.layout_library().get(name)
+        if user:self.template_previewing=False;self.layout=MonitorLayout.from_dict(deepcopy(user));self.layout_name.setText(name);self.load_scene();return
         catalog=templates(self.current_target)
-        if name in catalog:self.template_previewing=True;self.layout=deepcopy(catalog[name]);self.load_scene()
+        if name in catalog:self.template_previewing=True;self.layout=deepcopy(catalog[name]);self.layout_name.setText(name);self.load_scene()
     def load_template(self):
         name=self.template.currentText()
         if name=="Custom":return
-        self.template_previewing=False;self.layout=deepcopy(templates(self.current_target)[name]);self.layout.name="Custom";self.template.blockSignals(True);self.template.setCurrentText("Custom");self.template.blockSignals(False);self.load_scene()
+        user=self.layout_library().get(name);self.template_previewing=False;self.layout=MonitorLayout.from_dict(deepcopy(user)) if user else deepcopy(templates(self.current_target)[name])
+        if not user:self.layout.name="Custom";self.layout_name.setText("Custom");self.template.blockSignals(True);self.template.setCurrentText("Custom");self.template.blockSignals(False)
+        else:self.layout_name.setText(name)
+        self.load_scene()
     def load_scene(self):self.scene.layout=self.layout;self.scene.controller=LayoutEditController(self.layout);self.scene.controller.set_enabled(True);self.scene.setSceneRect(0,0,self.layout.width,self.layout.height);self.scene.reload();self.snap.setChecked(self.layout.snap_to_grid);self.grid.setValue(self.layout.grid_size);self.guides.setChecked(self.layout.alignment_guides);self.refresh_layers()
     def add_element(self):
         z=max((x.z_index for x in self.layout.elements),default=0)+1;e=MonitorElement("label + value",40,40,z_index=z,custom_label="Sensor",format_string="{label} {value}{unit}");self.layout.elements.append(e);self.scene.reload();self.scene.items_by_id[e.id].setSelected(True)

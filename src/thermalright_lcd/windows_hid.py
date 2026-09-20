@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes as c
+from copy import deepcopy
 import json
 import subprocess
 from .subprocess_utils import hidden_subprocess_kwargs
@@ -9,7 +10,7 @@ from typing import Protocol
 
 from .live_state import (DeviceDisconnected, DeviceIdentity, DeviceReenumerated,
                          SafetyError, TransportError, TransportTimeout, UsbTransport,
-                         validate_identity)
+                         expected_identity, validate_identity)
 
 HID_GUID="{4d1e55b2-f16f-11cf-88cb-001111000030}"
 INVALID_HANDLE_VALUE=c.c_void_p(-1).value
@@ -197,6 +198,26 @@ def discover_hid_identity(target:dict,api=None)->DeviceIdentity:
     return DeviceIdentity(target["vid_pid"],target["stable_instance_id"],pnp["container_id"],target["interface"],
                           target["endpoint"],target["response_endpoint"],target["transfer_type"],"HIDUSB",
                           f"{pnp['container_id']}|{pnp.get('location')}|{info.path}",info.path,target["host_payload_size"])
+
+def materialize_reviewed_hid_target(definition:dict,api=None)->dict:
+    """Bind the reviewed 5302 definition to one exact MI_00 HID interface."""
+    if definition.get("vid_pid")!="0416:5302":raise SafetyError("unsupported reviewed HID definition")
+    info=discover_5302(api)
+    if info.input_report_bytes!=definition["hid_input_report_bytes"] or info.output_report_bytes!=definition["hid_output_report_bytes"]:raise SafetyError("PID 5302 HID report capability mismatch")
+    script=("$ds=@(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^USB\\\\VID_0416&PID_5302\\\\' });"
+            "$items=@();foreach($d in $ds){$p=Get-PnpDeviceProperty -InstanceId $d.InstanceId;"
+            "$items+=@([ordered]@{status=$d.Status;instance_id=$d.InstanceId;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data})};"
+            "[ordered]@{count=$items.Count;items=$items}|ConvertTo-Json -Compress -Depth 4")
+    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
+    if cp.returncode:raise DeviceDisconnected("reviewed PID 5302 parent is not present")
+    result=json.loads(cp.stdout);items=result.get("items") or []
+    if isinstance(items,dict):items=[items]
+    if result.get("count")!=1:raise SafetyError(f"expected one reviewed PID 5302 parent, found {result.get('count',0)}")
+    item=items[0]
+    if item.get("status")!="OK":raise SafetyError("PID 5302 parent status is not OK")
+    target=deepcopy(definition);target.update(stable_instance_id=item["instance_id"],interface_instance_id=item["instance_id"],container_id=str(item.get("container_id") or ""),confirmed_device_path=info.path)
+    if not target["container_id"]:raise SafetyError("PID 5302 container identity is unavailable")
+    actual=discover_hid_identity(target,api);validate_identity(actual,expected_identity(target));return target
 
 def read_only_hid_capture_probe(vid:int,pid:int,timeout_ms:int=100)->dict:
     """Post input-only HID requests; never obtains output access."""
