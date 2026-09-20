@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "algorithm": "source-block-sha256-v1",
+  "approved_gui_sha256": "8f07274448b85cb8fafa2f4b791b534c0400a195079e2e7f4cdbb5b3b13c5ffa",
+  "protected": {
+    "PreviewLabel.__init__": "ae324e45d9075e6efb665e2dfd9ab2aa0d5ceeb9637ad0490c8da58141e2462b",
+    "PreviewLabel.sizeHint": "833025f6f69983b3d85ddf96d4787c9c242dfdf47c06d67fda1acc4fea90b853",
+    "PreviewLabel.minimumSizeHint": "5d200a743d88e814653d308bccc3e2074a53c6f3bc749a612261decbfe3a68a9",
+    "MediaLibraryDialog.__init__": "06c5e6ca12bec15776c95fb9f7e326e15b1ff1326361e23b036d1443bbaf3a0d",
+    "SettingsDialog.__init__": "bdb556bf031bea360d6e53157e6fafcb362956e6ff32574ddef09649984e2dc7",
+    "HardwareMonitorDialog.__init__": "405298cc602f2e8eb817c3b555cab8bc8f696bd59bcf980ebe0a6d44d44c18c0",
+    "ProfileManagerDialog.__init__": "7f1f87ba211429727dd8cedd1e145fcf44471831621139cdc6c71f3b55864ea8",
+    "DisplayCard.__init__": "bd21f587aa233179fa373c3d8461fffb1b92c614bfd7a726d00d559e1834331f",
+    "DisplayCard._fit_side_by_side_preview": "9ff7645925fde269a6d4c5a0c3aba40e3dddaf710d9fe53c1da14d003d763c00",
+    "DisplayCard.sizeHint": "2bef2c4f6b01128f0c4cf45ad1d18280d93007e2cc688a88315406911a833dd9",
+    "DisplayCard.set_layout_mode": "9b0b71928db6ebab4af9c18b221df8ddd72c65591e42ea959fa690949459662a",
+    "DisplayCard.resizeEvent": "6aa04405e74c1365440fc3008439fa2eb7e46573ed6e99d7a4e1ce08c5b820aa",
+    "MainWindow.__init__": "ec175082ca8716e29c003523fb8e7828f9336042eee2f6d23adfaf4604365fda",
+    "MainWindow.set_display_layout": "22bc22209589c7440ba873681195a3ee33990487fbf68b17188266deeb091727",
+    "MainWindow.swap_display_order": "e199200aee0f13d666f8002f2aaf085f3b26d0ac27889c4a6735a7656074f6a4",
+    "MainWindow.toggle_sidebar": "2ffd93e4a7cc32bc0d2784d66b952c684da81230d6a50dfb8551f96c44844766",
+    "MainWindow.set_sidebar_expanded": "c4b9358842d857e8f61aa988c3dadc18ea9ac13b865490c257ff1288b6f21d3c",
+    "MainWindow.select_page": "b2e6d95058f08c3017755f14232f36e39481e3671addb04d8a8cf1522a756f13",
+    "MainWindow._action_page": "b7d0a8fa27916d255c04f3f566bf830fc6b1186405e935abfaba91e6c430adf1",
+    "MainWindow._hardware_monitor_page": "fae3b32aafbad5382176242b8b0512c84bf674f3ea0488d691bd5856f9830e4b",
+    "MainWindow._performance_page": "5b2341c25678b20fd6720c1b6d224a4522710bb0163f78afe975ce4731f20e00",
+    "MainWindow._settings_page": "cdb2041b07d390dd3afeaf2630193c96e26f34c7c6a5e2b147685e38f9a8f0ae",
+    "MainWindow._diagnostics_page": "24f49a1eb96cbfd6f296feb02a8a9065d8f9ed8c8dabdebb2efbca2de6797ad2",
+    "STYLE": "6bc221fe9a706e332a39294c21a8493dede6e3cc2f500cdd4598874e5bb20cfd"
+  }
+}

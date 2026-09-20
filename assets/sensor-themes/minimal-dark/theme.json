@@ -1,0 +1,21 @@
+{
+  "format": "oni-sensor-theme",
+  "schema_version": 1,
+  "id": "minimal-dark",
+  "name": "Minimal Dark",
+  "description": "Quiet, readable hardware values with no fixed Python layout.",
+  "author": "Oni Thermal LCD contributors",
+  "canvas": {"width": 1280, "height": 480, "preset": "0416:5302", "scale_mode": "contain"},
+  "background_color": "#05070B",
+  "metadata": {"category": "minimal", "editable": true},
+  "elements": [
+    {"id": "clock", "name": "Large clock", "type": "clock", "x": 44, "y": 65, "width": 510, "height": 150, "font_size": 104, "font_weight": 600, "text_color": "#F4F7FF", "time_format": "%H:%M"},
+    {"id": "date", "name": "Date", "type": "date", "x": 48, "y": 220, "width": 500, "height": 55, "font_size": 25, "text_color": "#738194", "date_format": "%A, %d %B"},
+    {"id": "cpu-label", "name": "CPU label", "type": "sensor_label", "x": 650, "y": 72, "width": 230, "height": 36, "sensor_binding": "cpu.temperature", "text": "CPU", "font_size": 18, "font_weight": 600, "text_color": "#718096"},
+    {"id": "cpu-value", "name": "CPU value", "type": "sensor_value", "x": 650, "y": 108, "width": 260, "height": 86, "sensor_binding": "cpu.temperature", "unit": "°C", "font_size": 58, "font_weight": 600, "text_color": "#DCE5F5"},
+    {"id": "gpu-label", "name": "GPU label", "type": "sensor_label", "x": 960, "y": 72, "width": 230, "height": 36, "sensor_binding": "gpu.temperature", "text": "GPU", "font_size": 18, "font_weight": 600, "text_color": "#718096"},
+    {"id": "gpu-value", "name": "GPU value", "type": "sensor_value", "x": 960, "y": 108, "width": 260, "height": 86, "sensor_binding": "gpu.temperature", "unit": "°C", "font_size": 58, "font_weight": 600, "text_color": "#DCE5F5"},
+    {"id": "memory", "name": "Memory usage", "type": "progress_bar", "x": 650, "y": 285, "width": 570, "height": 28, "sensor_binding": "memory.usage", "minimum": 0, "maximum": 100, "corner_radius": 14, "track_color": "#151C28", "value_color": "#7B8DA8"},
+    {"id": "memory-value", "name": "Memory value", "type": "sensor_value", "x": 650, "y": 330, "width": 570, "height": 52, "sensor_binding": "memory.usage", "unit": "%", "font_size": 26, "alignment": "center", "text_color": "#A8B5C7", "prefix": "MEMORY  "}
+  ]
+}

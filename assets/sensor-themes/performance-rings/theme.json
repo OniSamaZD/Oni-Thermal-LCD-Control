@@ -1,0 +1,24 @@
+{
+  "format": "oni-sensor-theme",
+  "schema_version": 1,
+  "id": "performance-rings",
+  "name": "Performance Rings",
+  "description": "Independent editable ring gauges for core performance telemetry.",
+  "author": "Oni Thermal LCD contributors",
+  "canvas": {"width": 1920, "height": 462, "preset": "0416:5408", "scale_mode": "contain"},
+  "background_color": "#060A11",
+  "metadata": {"category": "performance", "editable": true},
+  "elements": [
+    {"id": "heading", "name": "Heading", "type": "text", "x": 40, "y": 18, "width": 1840, "height": 50, "text": "PERFORMANCE // LIVE", "font_size": 27, "font_weight": 700, "alignment": "center", "letter_spacing": 3, "text_color": "#BFD9E8"},
+    {"id": "cpu-ring", "name": "CPU usage ring", "type": "ring_gauge", "x": 110, "y": 80, "width": 300, "height": 300, "sensor_binding": "cpu.usage", "minimum": 0, "maximum": 100, "thickness": 22, "start_angle": 90, "end_angle": 450, "track_color": "#142436", "value_color": "#2BC8FF", "warning_threshold": 80, "critical_threshold": 95, "glow": true, "glow_color": "#2BC8FF50", "glow_strength": 5},
+    {"id": "cpu-value", "name": "CPU usage value", "type": "sensor_value", "x": 155, "y": 178, "width": 210, "height": 80, "sensor_binding": "cpu.usage", "unit": "%", "decimal_precision": 0, "font_size": 50, "font_weight": 700, "alignment": "center", "text_color": "#F2FBFF"},
+    {"id": "cpu-label", "name": "CPU usage label", "type": "sensor_label", "x": 155, "y": 252, "width": 210, "height": 44, "sensor_binding": "cpu.usage", "text": "CPU LOAD", "font_size": 18, "alignment": "center", "text_color": "#789CB0"},
+    {"id": "gpu-ring", "name": "GPU usage ring", "type": "ring_gauge", "x": 540, "y": 80, "width": 300, "height": 300, "sensor_binding": "gpu.usage", "minimum": 0, "maximum": 100, "thickness": 22, "start_angle": 90, "end_angle": 450, "track_color": "#241B3B", "value_color": "#A98CFF", "warning_threshold": 85, "critical_threshold": 97},
+    {"id": "gpu-value", "name": "GPU usage value", "type": "sensor_value", "x": 585, "y": 178, "width": 210, "height": 80, "sensor_binding": "gpu.usage", "unit": "%", "decimal_precision": 0, "font_size": 50, "font_weight": 700, "alignment": "center", "text_color": "#F8F5FF"},
+    {"id": "gpu-label", "name": "GPU usage label", "type": "sensor_label", "x": 585, "y": 252, "width": 210, "height": 44, "sensor_binding": "gpu.usage", "text": "GPU LOAD", "font_size": 18, "alignment": "center", "text_color": "#8C7CB5"},
+    {"id": "memory-ring", "name": "Memory ring", "type": "arc_gauge", "x": 970, "y": 80, "width": 300, "height": 300, "sensor_binding": "memory.usage", "minimum": 0, "maximum": 100, "thickness": 22, "start_angle": 135, "end_angle": 405, "track_color": "#182A24", "value_color": "#48E0B5"},
+    {"id": "memory-value", "name": "Memory value", "type": "sensor_value", "x": 1015, "y": 178, "width": 210, "height": 80, "sensor_binding": "memory.usage", "unit": "%", "decimal_precision": 0, "font_size": 50, "font_weight": 700, "alignment": "center", "text_color": "#F1FFFB"},
+    {"id": "fps-ring", "name": "FPS ring", "type": "arc_gauge", "x": 1400, "y": 80, "width": 300, "height": 300, "sensor_binding": "game.fps", "minimum": 0, "maximum": 240, "thickness": 22, "start_angle": 135, "end_angle": 405, "track_color": "#332915", "value_color": "#FFD166"},
+    {"id": "fps-value", "name": "FPS value", "type": "sensor_value", "x": 1445, "y": 178, "width": 210, "height": 80, "sensor_binding": "game.fps", "decimal_precision": 0, "font_size": 50, "font_weight": 700, "alignment": "center", "text_color": "#FFF7DC", "suffix": " FPS"}
+  ]
+}

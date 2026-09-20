@@ -1,0 +1,24 @@
+{
+  "format": "oni-sensor-theme",
+  "schema_version": 1,
+  "id": "oni-cyber-blue",
+  "name": "ONI Cyber Blue",
+  "description": "Electric-blue telemetry dashboard built entirely from editable theme elements.",
+  "author": "Oni Thermal LCD contributors",
+  "canvas": {"width": 1920, "height": 462, "preset": "0416:5408", "scale_mode": "contain"},
+  "background_color": "#03070D",
+  "metadata": {"category": "gaming", "editable": true},
+  "elements": [
+    {"id": "title", "name": "Theme title", "type": "text", "x": 34, "y": 20, "width": 430, "height": 58, "text": "ONI // TELEMETRY", "font_size": 30, "font_weight": 700, "text_color": "#6FE7FF", "letter_spacing": 2.0, "glow": true, "glow_color": "#2BC8FF80", "glow_strength": 5},
+    {"id": "clock", "name": "Clock", "type": "clock", "x": 1510, "y": 20, "width": 370, "height": 58, "font_size": 30, "font_weight": 600, "alignment": "right", "text_color": "#DDF8FF", "time_format": "%H:%M:%S"},
+    {"id": "cpu-label", "name": "CPU label", "type": "sensor_label", "x": 40, "y": 110, "width": 260, "height": 40, "sensor_binding": "cpu.temperature", "text": "CPU PACKAGE", "font_size": 20, "font_weight": 600, "text_color": "#789CB0"},
+    {"id": "cpu-value", "name": "CPU temperature", "type": "sensor_value", "x": 40, "y": 148, "width": 300, "height": 92, "sensor_binding": "cpu.temperature", "unit": "°C", "decimal_precision": 1, "font_size": 62, "font_weight": 700, "text_color": "#F3FCFF", "glow": true, "glow_color": "#2BC8FF60", "glow_strength": 4},
+    {"id": "cpu-bar", "name": "CPU usage bar", "type": "horizontal_bar", "x": 40, "y": 270, "width": 520, "height": 22, "sensor_binding": "cpu.usage", "minimum": 0, "maximum": 100, "warning_threshold": 75, "critical_threshold": 92, "corner_radius": 11, "track_color": "#102637", "value_color": "#2BC8FF", "warning_color": "#FFB020", "critical_color": "#FF4D5A"},
+    {"id": "gpu-label", "name": "GPU label", "type": "sensor_label", "x": 650, "y": 110, "width": 260, "height": 40, "sensor_binding": "gpu.temperature", "text": "GPU CORE", "font_size": 20, "font_weight": 600, "text_color": "#789CB0"},
+    {"id": "gpu-value", "name": "GPU temperature", "type": "sensor_value", "x": 650, "y": 148, "width": 300, "height": 92, "sensor_binding": "gpu.temperature", "unit": "°C", "decimal_precision": 1, "font_size": 62, "font_weight": 700, "text_color": "#F3FCFF"},
+    {"id": "gpu-bar", "name": "GPU usage bar", "type": "horizontal_bar", "x": 650, "y": 270, "width": 520, "height": 22, "sensor_binding": "gpu.usage", "minimum": 0, "maximum": 100, "warning_threshold": 80, "critical_threshold": 95, "corner_radius": 11, "track_color": "#102637", "value_color": "#2BC8FF"},
+    {"id": "fps-label", "name": "FPS label", "type": "sensor_label", "x": 1280, "y": 110, "width": 220, "height": 40, "sensor_binding": "game.fps", "text": "FRAME RATE", "font_size": 20, "font_weight": 600, "text_color": "#789CB0"},
+    {"id": "fps-value", "name": "FPS value", "type": "sensor_value", "x": 1280, "y": 148, "width": 240, "height": 92, "sensor_binding": "game.fps", "decimal_precision": 0, "suffix": " FPS", "font_size": 58, "font_weight": 700, "text_color": "#6FE7FF"},
+    {"id": "frametime-graph", "name": "Frametime history", "type": "line_graph", "x": 1280, "y": 265, "width": 600, "height": 145, "sensor_binding": "game.frametime", "history_duration": 60, "line_width": 4, "fill": true, "fill_color": "#2BC8FF30", "smoothing": true, "automatic_scale": true, "scale_min": 0, "scale_max": 40, "background_color": "#071522", "border_color": "#164B67", "border_width": 1, "corner_radius": 12, "value_color": "#6FE7FF"}
+  ]
+}

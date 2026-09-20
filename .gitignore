@@ -1,0 +1,49 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+dist-installer/
+*.spec.bak
+
+# Local test and scratch output
+.test-*/
+temp/
+scratch_appdata/
+logs/
+*.log
+*.bak
+*.before_*
+
+# Captured device traffic and generated analysis
+captures/
+analysis/
+
+# Machine-specific authorization and user data
+config/device-allowlist.json
+profiles/
+profile-assets/
+.env
+.env.*
+
+# Local development notes and backups
+AGENTS.md
+PROGRESS.md
+src/thermalright_lcd/gui_backup.py
+run-gui-debug-v*.bat
+tools/static/bin/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
