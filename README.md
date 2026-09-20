@@ -8,7 +8,7 @@
 
 Oni Thermal LCD Control is a Windows application for controlling supported Thermalright USB LCD displays. The project includes dual-display control, photo/video/GIF playback, customizable Sensor Themes, hardware-monitor layouts, profiles, diagnostics, performance controls, and an ONI-themed interface.
 
-The project has been developed iteratively with assistance from **OpenAI ChatGPT and Codex**.
+Oni Thermal LCD Control is developed and maintained by **OniSamaZD**, with assistance from **OpenAI ChatGPT and Codex** during development, testing, documentation, and iteration.
 
 > **Important hardware note:** USB output is intentionally fail-closed. The public repository does not include machine-specific device authorization records. The application can be launched from source, but LCD writes may remain disabled until the connected device has a reviewed local authorization configuration. A simple public device-enrollment flow is not finished yet.
 
@@ -45,7 +45,21 @@ A large part of the application exists and can be tested, but **there are still 
 - Public device onboarding is not finished; the current fail-closed authorization model can prevent LCD writes on a new machine.
 - There is no public stable EXE/installer release yet.
 
-Bug reports are welcome. Please include your display model, what you clicked, what you expected, and what actually happened.
+### Please report bugs
+
+If you find a bug, please report it. Reproducible reports are especially helpful.
+
+Useful information includes:
+
+- display model
+- USB PID if known
+- Windows version
+- exact steps to reproduce
+- screenshot/video if useful
+- expected behavior
+- actual behavior
+
+I will review reports and fix what I can as time allows. This is a community-facing open-source project, so fixes and improvements may take time.
 
 ## Supported Thermalright displays
 
@@ -57,6 +71,42 @@ Current device support targets:
 | `0416:5302` | Thermalright Trofeo Vision LCD 6.86 | `1280 × 480` |
 
 Hardware revisions can differ. Support is currently tied to the exact device/transport definitions in the source.
+
+## Community device support
+
+I cannot personally buy and test every Thermalright LCD model or hardware revision.
+
+Because the project is open source, the community is encouraged to contribute support for additional displays, improve compatibility, optimize performance, add features, and fix bugs.
+
+If you add support for a new LCD or improve existing support:
+
+1. fork the repository
+2. implement and test the change
+3. include the device model, USB IDs, transport details, and reproducible test information
+4. open a Pull Request
+5. I will review the change before deciding whether to merge it into the official repository
+
+Please do not remove or bypass device-safety checks just to make a new model work.
+
+## Official project vs forks
+
+This repository is the **official Oni Thermal LCD Control repository maintained by OniSamaZD**.
+
+Community members are welcome to:
+
+- fork the project
+- modify the source
+- add features
+- optimize code
+- add support for additional LCDs
+- fix bugs
+- submit Pull Requests
+
+Changes submitted by others do **not** automatically become part of the official project. They are reviewed before being merged.
+
+Official releases from this repository are published by the project maintainer.
+
+Because the project is licensed under MIT, other people may also maintain and redistribute their own modified forks under the terms of that license. Those forks or builds are **not official Oni Thermal LCD Control releases from this repository** unless explicitly identified as such here.
 
 ## What is implemented
 
@@ -244,22 +294,6 @@ Generated output is local and is intentionally not committed to the repository.
 - **Video/GIF does not play:** confirm the dependencies installed successfully and the media file can be read by PyAV/OpenCV.
 - **A second app launch exits:** the application uses single-instance behavior and should restore the existing instance.
 - **Sensor Theme behaves incorrectly after editing:** this is a known development issue; please report reproducible steps.
-
-## Contributing / bug reports
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing transport/device code.
-
-If reporting a bug, useful information includes:
-
-- display model
-- USB PID if known
-- Windows version
-- exact steps to reproduce
-- screenshot/video if useful
-- expected behavior
-- actual behavior
-
-Do **not** post personal device instance identifiers, credentials, or private configuration files in public issues.
 
 ## License
 
