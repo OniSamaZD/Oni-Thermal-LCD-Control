@@ -1,16 +1,43 @@
 # Oni Thermal LCD Control
 
+> **Development Preview / Work in Progress**
+>
+> This project is still under active development. The current source is public so people can follow progress and test the application, but some workflows are incomplete and known UI/runtime bugs remain. **Do not treat the current repository as a finished stable release yet.**
+
 Oni Thermal LCD Control is a Windows desktop application for configuring and driving supported Thermalright USB LCD displays. It provides dual-display control, photo/video/GIF playback, sensor themes, profiles, hardware monitoring, performance controls, and diagnostics in an ONI-themed interface.
 
 > **Safety:** USB output is fail-closed. A display must match a locally reviewed authorization entry before the application can send generated media. The public source distribution does not include machine-specific authorization records.
 
 ## Screenshots
 
-<!-- Add release screenshots here after final visual approval. -->
+### Home / dual-display workspace
 
-- Home / dual-display workspace: `docs/screenshots/home.png`
-- Sensor theme gallery: `docs/screenshots/sensor-themes.png`
-- Hardware monitor designer: `docs/screenshots/hardware-monitor.png`
+![Oni Thermal LCD Control Home](docs/screenshots/home.png)
+
+### Sensor Theme Editor
+
+![Oni Sensor Theme Editor](docs/screenshots/sensor-themes.png)
+
+### Hardware Monitor
+
+![Oni Hardware Monitor](docs/screenshots/hardware-monitor.png)
+
+## Current development status
+
+The application is usable from source, but the Sensor Theme / Hardware Monitor workflow is still being completed.
+
+Known work in progress:
+
+- Sensor Theme deployment is still being integrated end-to-end with the existing LCD output runtime.
+- **Sensor + Media** combined output needs to be restored/verified.
+- A floating/child preview window can still appear in some Sensor Theme states and must be removed.
+- Editing/moving Sensor Theme elements can currently break or detach the active LCD deployment in some cases.
+- Hardware Monitor customization does not yet expose every supported editable property.
+- Saved Hardware Monitor layouts still need a complete **Save -> Home selector -> Play/Apply -> LCD** workflow.
+- Saved user themes/layouts need reliable Home refresh, rename/delete handling, restart restore, and dual-display deployment verification.
+- Final installer / downloadable stable release will come after these remaining regressions are fixed and validated.
+
+If you test the current preview, expect active development and changes.
 
 ## Supported displays
 
@@ -27,26 +54,27 @@ Hardware revisions can differ. Confirm the detected device in Diagnostics and ke
 
 - Independent or synchronized control of two supported LCDs
 - Photo, video, and animated GIF playback with fit, fill, position, zoom, and rotation controls
-- Sensor-theme gallery and editable hardware-monitor layouts
+- Data-driven, customizable Sensor Theme engine
+- Visual Sensor Theme editor under active development
+- Editable hardware-monitor layouts
 - Reusable profiles and per-display settings
 - Startup restore, tray operation, brightness, performance, and diagnostics controls
 - Strict per-device authorization gates for USB writes
-- Portable Windows build with no separate Python installation required
+- Portable Windows build pipeline with no separate Python installation required for packaged builds
 
 ## Install on Windows
 
-### Installer
+### Current preview
 
-1. Download `Oni-Thermal-LCD-Control-Setup.exe` from the release assets.
-2. Run the installer and follow the prompts.
-3. Choose whether to create the optional desktop shortcut.
-4. Launch **Oni Thermal LCD Control** from the Start Menu.
+There is no recommended stable public installer release yet.
 
-The installer defaults to Program Files and registers a standard uninstaller. Uninstalling the application leaves user-created settings and profiles under `%LOCALAPPDATA%\OniThermalLcd` intact.
+For now, clone/download the source and run the application from the repository. A public installer and portable release will be published after the remaining Sensor Theme and Hardware Monitor integration work is completed.
 
-### Portable build
+### Future installer
 
-Download and extract the complete portable archive, then run `Oni Thermal LCD Control.exe`. Keep the `_internal` directory beside the executable. Portable means no Python installation is required; application settings still use `%LOCALAPPDATA%\OniThermalLcd`.
+The project already contains the local installer/build pipeline. Once the stable release is ready, the installer will be published as:
+
+`Oni-Thermal-LCD-Control-Setup.exe`
 
 ## Development setup
 
@@ -59,18 +87,54 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[gui]"
 ```
 
-Alternatively, install the minimum runtime list with `py -3.12 -m pip install -r requirements.txt`.
+Alternatively, install the minimum runtime list with:
+
+```powershell
+py -3.12 -m pip install -r requirements.txt
+```
 
 The local `config/device-allowlist.json` is intentionally not versioned because it contains machine-specific hardware identifiers. Start from `config/device-allowlist.example.json`; do not enable write authorization unless the device and transport have been independently validated.
 
 ## Run from source
+
+The easiest Windows development-preview launch is:
+
+```text
+run-gui.bat
+```
+
+Or run directly:
 
 ```powershell
 $env:PYTHONPATH = "src"
 py -3.12 -m thermalright_lcd.gui
 ```
 
-You can also double-click `run-gui.bat`. The safe smoke mode is `run-gui.bat --smoke-test`.
+The safe smoke mode is:
+
+```text
+run-gui.bat --smoke-test
+```
+
+## Sensor Themes
+
+The Sensor Theme system is data-driven rather than a collection of hard-coded layouts.
+
+Current theme support includes:
+
+- custom positions and sizes
+- text and sensor values
+- images and icons
+- progress/horizontal/vertical bars
+- ring and arc gauges
+- line graphs
+- clock/date
+- colors, fonts, borders, glow and opacity
+- logical sensor bindings
+- import/export using `.oni-theme`
+- separate built-in and user-created themes
+
+See [docs/sensor-themes.md](docs/sensor-themes.md) for the current format and safety model.
 
 ## Tests
 
@@ -107,6 +171,8 @@ The portable application is written to `dist\`. The installer is written to `dis
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Device transport changes require reproducible evidence and must preserve all authorization and safety gates.
+
+Bug reports are welcome while the project is in preview. Please include the display model, exact workflow, and reproducible steps when possible.
 
 ## License
 
