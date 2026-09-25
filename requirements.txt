@@ -4,3 +4,5 @@ opencv-python>=4.9
 psutil>=5.9
 av>=18.1
 numpy>=2.0
+pyserial>=3.5
+pycryptodome>=3.20

@@ -42,14 +42,11 @@ class DesignerTests(unittest.TestCase):
     def test_layouts_save_independently_per_profile_and_lcd(self):
         with tempfile.TemporaryDirectory() as d:
             settings=AppSettings();settings.profiles["Gaming"]={};store=SettingsStore(Path(d)/"settings.json");dialog=HardwareMonitorDesigner(settings,store);dialog.add_element();left_id=dialog.layout.elements[0].id;dialog.save_current();dialog.current_target="0416:5302";dialog.layout=MonitorLayout("right","0416:5302",1280,480,elements=[MonitorElement("static label",3,4,text="right")]);dialog.current_profile="Gaming";dialog.save_current();dialog.save();loaded=store.load();self.assertEqual(loaded.monitor_layouts["Default"]["0416:5408"]["elements"][0]["id"],left_id);self.assertEqual(loaded.monitor_layouts["Gaming"]["0416:5302"]["elements"][0]["text"],"right");dialog.reject()
-    def test_template_selection_immediately_previews_finished_semantic_layout(self):
+    def test_zero_layout_designer_opens_a_genuinely_blank_canvas(self):
         with tempfile.TemporaryDirectory() as d:
             settings=AppSettings();store=SettingsStore(Path(d)/"settings.json");dialog=HardwareMonitorDesigner(settings,store)
-            dialog.template.setCurrentText("Gaming Dashboard")
-            self.assertTrue(dialog.template_previewing);self.assertEqual(dialog.layout.name,"Gaming Dashboard")
-            ids={element.sensor_id for element in dialog.layout.elements}
-            self.assertTrue({"cpu.temperature","cpu.usage","cpu.clock","cpu.power","gpu.temperature","gpu.usage","gpu.clock","gpu.power","gpu.memory_used","game.fps","game.frametime","memory.usage"}.issubset(ids))
-            self.assertGreaterEqual(len(dialog.layout.elements),20);dialog.load_template();self.assertFalse(dialog.template_previewing);self.assertEqual(dialog.layout.name,"Custom");dialog.reject()
+            self.assertEqual(dialog.template.count(),1);self.assertEqual(dialog.template.currentText(),"Custom")
+            self.assertFalse(dialog.template_previewing);self.assertEqual(dialog.layout.name,"Custom");self.assertEqual(dialog.layout.elements,[]);dialog.reject()
     def test_named_layout_save_rename_delete_and_restart_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/"settings.json";settings=AppSettings();store=SettingsStore(path);dialog=HardwareMonitorDesigner(settings,store)

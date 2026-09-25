@@ -65,7 +65,7 @@ class SettingsStore:
             "restore_previous_media","auto_reconnect","remember_window_position","default_fps","default_display_mode","stale_frame_dropping",
             "resume_playback","hardware_decode","performance_mode","sensor_interval_ms","last_media_directory","media_library","sensor_favorites","recent_sensors","monitor_layouts","monitor_layout_library","designer_geometry","window_geometry","window_maximized","sidebar_expanded","display_layout","display_order","splitter_sizes","preview_scales","advanced_expanded","active_profile","display_sync","unified_sync_view","link_brightness","output_modes","monitor_templates","sensor_theme_ids","sensor_theme_fps")}
         if known["display_layout"] not in {"side_by_side","stacked"}:known["display_layout"]="stacked"
-        if sorted(known["display_order"])!=["0416:5302","0416:5408"]:known["display_order"]=["0416:5408","0416:5302"]
+        if not isinstance(known["display_order"],list) or not all(isinstance(item,str) for item in known["display_order"]):known["display_order"]=[]
         # Old builds persisted the former false-by-default checkbox even when
         # the user never selected an exit policy. The new explicit preference
         # therefore defaults safely to tray unless the new key is present.

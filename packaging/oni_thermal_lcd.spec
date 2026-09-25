@@ -12,6 +12,7 @@ datas = [
     (str(ROOT / "assets" / "oni-thermal-lcd.ico"), "assets"),
     (str(ROOT / "assets" / "oni-thermal-lcd-icon.png"), "assets"),
     (str(ROOT / "assets" / "products"), "assets/products"),
+    (str(ROOT / "assets" / "ui"), "assets/ui"),
 ]
 
 a = Analysis(
@@ -19,7 +20,7 @@ a = Analysis(
     pathex=[str(ROOT / "src")],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=["serial", "serial.win32", "Crypto.Cipher.DES"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

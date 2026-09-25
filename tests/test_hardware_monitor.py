@@ -2,22 +2,9 @@ import unittest
 from thermalright_lcd.hardware_monitor import BoundedSensorHistory,MonitorElement,MonitorLayout,MonitorRenderer,WIDGET_KINDS,condition_visible,templates
 
 class HardwareMonitorTests(unittest.TestCase):
-    def test_polished_factory_theme_catalog_is_independent_per_device(self):
-        required={"Oni Crimson","Cyber Red","Neon Blue","Ice / White","Minimal Dark","Carbon","Racing","Sci-Fi HUD","Clean Hardware","Gaming Wide"}
-        wide,compact=templates("0416:5408"),templates("0416:5302");self.assertTrue(required.issubset(wide));self.assertTrue(required.issubset(compact))
-        self.assertEqual((wide["Oni Crimson"].width,wide["Oni Crimson"].height),(1920,462));self.assertEqual((compact["Oni Crimson"].width,compact["Oni Crimson"].height),(1280,480));self.assertIsNot(wide["Oni Crimson"],compact["Oni Crimson"])
-    def test_templates_target_exact_device_dimensions(self):
-        self.assertEqual(MonitorRenderer(templates("0416:5408")["Gaming"]).render({"game.fps":144}).size,(1920,462))
-        self.assertEqual(templates("0416:5302")["Minimal"].height,480)
-        self.assertGreaterEqual(len(templates("0416:5408")),15)
-        self.assertGreaterEqual(len(templates("0416:5302")),15)
-        required={"Gaming Dashboard","Benchmark Mode","Minimal CPU/GPU","Full System Overview","Thermal Dashboard","CPU Focus","GPU Focus","GPU Overclock","CPU Overclock","Power Monitor","FPS + Frametime","Network Monitor","Storage Monitor","Cooling / Fans","Clean Dark","Cyber Telemetry","Neon Gaming","Compact Essentials","Clock + Hardware","Diagnostic / Stress Test"}
-        self.assertTrue(required.issubset(templates("0416:5408")));self.assertTrue(required.issubset(templates("0416:5302")))
-        for target,size in (("0416:5408",(1920,462)),("0416:5302",(1280,480))):
-            for name in required:
-                layout=templates(target)[name];self.assertEqual((layout.width,layout.height),size);self.assertTrue(layout.elements);self.assertTrue(any(e.sensor_id for e in layout.elements))
-            gpu_sensors={element.sensor_id for element in templates(target)["GPU Focus"].elements if element.sensor_id}
-            self.assertTrue({"gpu.usage","gpu.temperature","gpu.hotspot","gpu.clock","gpu.power","gpu.memory_used","gpu.fan"}.issubset(gpu_sensors))
+    def test_bundled_layout_catalog_is_empty_for_every_device(self):
+        self.assertEqual(templates("0416:5408"),{})
+        self.assertEqual(templates("0416:5302"),{})
         self.assertTrue({"clock","date","panel","rectangle","separator"}.issubset(WIDGET_KINDS))
     def test_layout_round_trip_and_sensor_render(self):
         layout=MonitorLayout("x","0416:5302",1280,480,elements=[MonitorElement("sensor",10,10,text="CPU {value}{unit}",sensor_id="cpu",unit="°C")])

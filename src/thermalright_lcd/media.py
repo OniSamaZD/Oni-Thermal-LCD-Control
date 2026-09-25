@@ -87,20 +87,39 @@ class MediaPipeline:
         if max_static_entries<1:raise ValueError("cache must retain at least one entry")
         import os
         self.max_static_entries=max_static_entries;self._cache=OrderedDict();self._lock=threading.Lock();self._final_buffers={};self.last_metrics={};self.metrics_history=deque(maxlen=2048);self.total_prepares=0;self.pid5302_quality=Pid5302ReportQualityController();self.pid5302_report_correction=(os.environ.get("ONI_LCD_PID5302_REPORT_CORRECTION","1")!="0" if pid5302_report_correction is None else bool(pid5302_report_correction));self.cache_metrics={"source_hits":0,"source_misses":0,"jpeg_skips":0,"composition_skips":0}
+    def register_target(self,device_id,size):self.TARGETS[device_id]=tuple(size)
+    def _target(self,device_id):
+        if device_id not in self.TARGETS:
+            from .devices.registry import device_definition
+            self.TARGETS[device_id]=device_definition(device_id).encoded_size
+        return self.TARGETS[device_id]
+    def _encode(self,prepared,device_id):
+        from .encoder import encode_5302,encode_5408,encode_reference,image_to_rgb565
+        if device_id=="0416:5408":return encode_5408(prepared.jpeg)
+        if device_id=="0416:5302":return encode_5302(prepared.jpeg)
+        from .reference_runtime import reference_model
+        model=reference_model(device_id)
+        if device_id.startswith("community-ref:"):
+            from .devices.community_panels import encode_community
+            if model.pixel_format=="jpeg":return encode_community(model,jpeg=prepared.jpeg)
+            from .devices.beadapanel_protocol import encode_rgb565
+            return encode_community(model,pixels=encode_rgb565(prepared.canvas,model.render_size,order="BGR"))
+        if model.pixel_format=="jpeg":return encode_reference(model,jpeg=prepared.jpeg)
+        order="big" if model.pixel_format.endswith("be") else "little"
+        return encode_reference(model,rgb565=image_to_rgb565(prepared.canvas,order))
     def _final_buffer(self,vid_pid):
-        tw,th=self.TARGETS[vid_pid];buffer=self._final_buffers.get(vid_pid)
+        tw,th=self._target(vid_pid);buffer=self._final_buffers.get(vid_pid)
         if buffer is None or buffer.shape!=(th,tw,3):
             buffer=np.empty((th,tw,3),dtype=np.uint8);self._final_buffers[vid_pid]=buffer
         return buffer
     def prepare_static(self,path:Path,vid_pid:str,mode:FitMode=FitMode.FIT,rotation:int=0,quality:int=95,pan_x:int=0,pan_y:int=0,zoom:float=1.0,brightness:int=100):
-        from .encoder import encode_5302,encode_5408
         path=Path(path);stat=path.stat();key=(str(path.resolve()),stat.st_mtime_ns,stat.st_size,vid_pid,mode.value,rotation%360,quality,int(pan_x),int(pan_y),round(float(zoom),3),int(brightness))
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key);self.cache_metrics["source_hits"]+=1;self.cache_metrics["composition_skips"]+=1;self.cache_metrics["jpeg_skips"]+=1;return self._cache[key]
             self.cache_metrics["source_misses"]+=1
-        prepared=render_static(path,self.TARGETS[vid_pid],mode,rotation,quality,pan_x,pan_y,zoom,brightness)
-        encoded=encode_5408(prepared.jpeg) if vid_pid=="0416:5408" else encode_5302(prepared.jpeg)
+        prepared=render_static(path,self._target(vid_pid),mode,rotation,quality,pan_x,pan_y,zoom,brightness)
+        encoded=self._encode(prepared,vid_pid)
         preview=prepared.canvas.copy();preview.thumbnail((720,240));prepared.canvas.close()
         value=(PreparedImage(preview,b"",prepared.source,prepared.mode,prepared.rotation),encoded)
         with self._lock:
@@ -110,9 +129,8 @@ class MediaPipeline:
         return value
     def prepare_image(self,image:Image.Image,vid_pid:str,mode:FitMode=FitMode.FIT,rotation:int=0,quality:int=95,pan_x:int=0,pan_y:int=0,zoom:float=1.0,brightness:int=100,overlay:Image.Image|None=None):
         """Prepare one decoded animation/video frame without retaining it."""
-        from .encoder import encode_5302,encode_5408
-        prepared=render_image(image,self.TARGETS[vid_pid],mode,rotation,quality,None,pan_x,pan_y,zoom,brightness,overlay)
-        encoded=encode_5408(prepared.jpeg) if vid_pid=="0416:5408" else encode_5302(prepared.jpeg)
+        prepared=render_image(image,self._target(vid_pid),mode,rotation,quality,None,pan_x,pan_y,zoom,brightness,overlay)
+        encoded=self._encode(prepared,vid_pid)
         self.total_prepares+=1
         return prepared,encoded
     def prepare_bgr(self,bgr,vid_pid:str,mode:FitMode=FitMode.FIT,rotation:int=0,quality:int=88,
@@ -120,7 +138,7 @@ class MediaPipeline:
         """Fast native video path: early scale, turbo-JPEG, one small preview."""
         import cv2
         if not _opencv_configured:configure_opencv_threads()
-        from .encoder import encode_5302,encode_5408
+        from .encoder import encode_5302,encode_5408,encode_reference,image_to_rgb565
         total_started=time.perf_counter();frame=bgr
         turns=(rotation%360)//90
         if turns==1:frame=cv2.rotate(frame,cv2.ROTATE_90_CLOCKWISE)
@@ -130,7 +148,7 @@ class MediaPipeline:
         if zoom>1 or pan_x or pan_y:
             h,w=frame.shape[:2];cw=max(1,int(w/zoom));ch=max(1,int(h/zoom));cx=w//2+int(pan_x);cy=h//2+int(pan_y)
             x=max(0,min(w-cw,cx-cw//2));y=max(0,min(h-ch,cy-ch//2));frame=frame[y:y+ch,x:x+cw]
-        tw,th=self.TARGETS[vid_pid];h,w=frame.shape[:2]
+        tw,th=self._target(vid_pid);h,w=frame.shape[:2]
         if mode==FitMode.STRETCH:out=cv2.resize(frame,(tw,th),interpolation=cv2.INTER_AREA)
         elif mode in (FitMode.FILL,FitMode.CROP):
             scale=max(tw/w,th/h);nw,nh=max(1,round(w*scale)),max(1,round(h*scale));work=frame if (nw,nh)==(w,h) else cv2.resize(frame,(nw,nh),interpolation=cv2.INTER_AREA);x=(nw-tw)//2;y=(nh-th)//2;out=work[y:y+th,x:x+tw]
@@ -170,7 +188,22 @@ class MediaPipeline:
             primary_bytes=jpeg.tobytes();corrected_bytes=jpeg2.tobytes();jpeg_bytes,chosen_quality=self.pid5302_quality.choose(primary_bytes,corrected_bytes)
         encode_ms=(time.perf_counter()-encode_started)*1000
         if jpeg_bytes is None:jpeg_bytes=jpeg.tobytes()
-        framing_started=time.perf_counter();encoded=encode_5408(jpeg_bytes) if vid_pid=="0416:5408" else encode_5302(jpeg_bytes);framing_ms=(time.perf_counter()-framing_started)*1000
+        framing_started=time.perf_counter()
+        if vid_pid=="0416:5408":encoded=encode_5408(jpeg_bytes)
+        elif vid_pid=="0416:5302":encoded=encode_5302(jpeg_bytes)
+        else:
+            from .reference_runtime import reference_model
+            model=reference_model(vid_pid)
+            if vid_pid.startswith("community-ref:"):
+                from .devices.community_panels import encode_community
+                if model.pixel_format=="jpeg":encoded=encode_community(model,jpeg=jpeg_bytes)
+                else:
+                    from .devices.beadapanel_protocol import encode_rgb565
+                    pil=Image.fromarray(cv2.cvtColor(out,cv2.COLOR_BGR2RGB));encoded=encode_community(model,pixels=encode_rgb565(pil,model.render_size,order="BGR"));pil.close()
+            elif model.pixel_format=="jpeg":encoded=encode_reference(model,jpeg=jpeg_bytes)
+            else:
+                pil=Image.fromarray(cv2.cvtColor(out,cv2.COLOR_BGR2RGB));encoded=encode_reference(model,rgb565=image_to_rgb565(pil,"big" if model.pixel_format.endswith("be") else "little"));pil.close()
+        framing_ms=(time.perf_counter()-framing_started)*1000
         canvas=None
         if generate_preview:
             scale=min(720/tw,240/th,1);preview=cv2.resize(out,(max(1,int(tw*scale)),max(1,int(th*scale))),interpolation=cv2.INTER_AREA)

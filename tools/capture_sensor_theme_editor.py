@@ -17,11 +17,6 @@ import thermalright_lcd.gui as gui
 from thermalright_lcd.device_connection import DisabledHardwareSender
 
 
-THEMES = (
-    "oni-cyber-blue", "minimal-dark", "performance-rings", "clean-hardware-monitor",
-)
-
-
 def capture(window, editor, target: Path, selected_id: str | None = None) -> None:
     QApplication.processEvents(); QApplication.processEvents()
     editor.scene.mark_preview_dirty(); editor.refresh_theme_browser(); editor.fit_canvas()
@@ -45,16 +40,13 @@ def main() -> int:
         editor = window.sensor_theme_editor
         fixed_now = lambda: datetime(2026, 9, 20, 9, 28, 3)
         editor.now_provider = fixed_now; editor.scene.now_provider = fixed_now
-        for theme_id in THEMES:
-            editor.document.load(editor.store.get(theme_id))
-            capture(window, editor, args.output / f"{theme_id}-editor.png")
-        editor.document.load(editor.store.get("oni-cyber-blue"))
+        capture(window, editor, args.output / "blank-theme-editor.png")
         editor.document.save_as("Custom ONI Layout")
         added = editor.document.add_element("text", (760, 360)); editor.document.set_property(added.id, "text", "CUSTOM LAYOUT")
         editor.document.set_property(added.id, "text_color", "#FFB020"); editor.document.set_property(added.id, "font_size", 26)
         capture(window, editor, args.output / "custom-modified-editor.png", added.id)
         window._force_exit = True; window.shutdown(); window.close(); QTimer.singleShot(0, app.quit); app.processEvents()
-    print(f"Captured 5 editor screenshots in {args.output.resolve()}")
+    print(f"Captured 2 editor screenshots in {args.output.resolve()}")
     return 0
 
 

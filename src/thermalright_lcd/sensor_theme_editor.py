@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from PIL import Image
 from PySide6.QtCore import QByteArray, QMimeData, QPointF, QRectF, QSize, Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox,
     QFileDialog, QFontComboBox, QFormLayout, QFrame, QGraphicsItem,
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from .sensor_theme import (
-    DISPLAY_PRESETS, ELEMENT_TYPES, SUPPORTED_SENSOR_BINDINGS, SensorTheme,
+    DISPLAY_PRESETS, ELEMENT_TYPES, SUPPORTED_SENSOR_BINDINGS, SensorBindingResolver, SensorTheme,
     ThemeCanvas, ThemeElement, ThemeValidationError, applicable_element_fields,
 )
 from .sensor_theme_package import export_theme_package
@@ -33,11 +33,11 @@ from .sensor_theme_store import SensorThemeStore, StoredTheme
 
 
 FRIENDLY_ELEMENT_NAMES = {
-    "text": "Text", "sensor_value": "Sensor Value", "sensor_label": "Sensor Label",
+    "text": "Text", "sensor_value": "Sensor Value", "sensor_label": "Sensor Label", "sensor_label_value": "Sensor Label + Value", "value_unit": "Value + Unit",
     "image": "Image", "icon": "Icon", "progress_bar": "Progress Bar",
     "horizontal_bar": "Horizontal Bar", "vertical_bar": "Vertical Bar",
     "ring_gauge": "Ring Gauge", "arc_gauge": "Arc Gauge",
-    "line_graph": "Line Graph", "clock": "Clock", "date": "Date",
+    "line_graph": "Line Graph", "area_graph": "Area Graph", "progress_indicator": "Progress Indicator", "clock": "Clock", "date": "Date", "fps": "FPS", "frametime": "Frametime",
 }
 
 FRIENDLY_SENSOR_NAMES = {
@@ -271,22 +271,24 @@ class SensorThemeDocument(QObject):
         }
         if element_type == "text":
             raw.update(text="Your text", font_size=32, font_weight=600)
-        elif element_type in {"sensor_value", "sensor_label"}:
+        elif element_type in {"sensor_value", "sensor_label", "sensor_label_value", "value_unit"}:
             raw.update(sensor_binding="cpu.usage", text="CPU USAGE" if element_type == "sensor_label" else "", font_size=30)
         elif element_type in {"image", "icon"}:
             raw.update(asset=self.ensure_placeholder_asset(), width=220, height=120)
-        elif element_type in {"progress_bar", "horizontal_bar"}:
+        elif element_type in {"progress_bar", "progress_indicator", "horizontal_bar"}:
             raw.update(sensor_binding="cpu.usage", width=360, height=28, direction="left_to_right", corner_radius=12)
         elif element_type == "vertical_bar":
             raw.update(sensor_binding="cpu.usage", width=36, height=220, direction="bottom_to_top", corner_radius=12)
         elif element_type in {"ring_gauge", "arc_gauge"}:
             raw.update(sensor_binding="cpu.usage", width=220, height=220, thickness=18)
-        elif element_type == "line_graph":
-            raw.update(sensor_binding="cpu.usage", width=440, height=180, fill=True, background_color="#071522", border_color="#164B67", border_width=1)
+        elif element_type in {"line_graph", "area_graph"}:
+            raw.update(sensor_binding="cpu.usage", width=440, height=180, fill=element_type=="area_graph", background_color="#071522", border_color="#164B67", border_width=1)
         elif element_type == "clock":
             raw.update(width=280, text="", font_size=42, font_weight=600, alignment="center")
         elif element_type == "date":
             raw.update(width=360, text="", font_size=26, alignment="center")
+        elif element_type=="fps":raw.update(sensor_binding="game.fps",unit="FPS",width=240,font_size=38)
+        elif element_type=="frametime":raw.update(sensor_binding="game.frametime",unit="ms",width=260,font_size=36,decimal_precision=1)
         element = ThemeElement.from_dict(raw)
         max_x = max(0, self.theme.canvas.width - element.width)
         max_y = max(0, self.theme.canvas.height - element.height)
@@ -347,6 +349,43 @@ class SensorThemeDocument(QObject):
                 elif operation == "backward": item.z_index -= 1
         return self.mutate(apply)
 
+    def align(self, element_ids: Iterable[str], operation: str) -> bool:
+        selected_ids = set(element_ids)
+        selected = [item for item in self.theme.elements if item.id in selected_ids] if self.theme else []
+        if len(selected) < 2:
+            return False
+        if operation not in {"left", "hcenter", "right", "top", "vcenter", "bottom", "distribute_h", "distribute_v"}:
+            raise ThemeValidationError(f"unsupported alignment operation: {operation}")
+
+        def apply(_theme: SensorTheme) -> None:
+            left = min(item.x for item in selected); right = max(item.x + item.width for item in selected)
+            top = min(item.y for item in selected); bottom = max(item.y + item.height for item in selected)
+            if operation == "left":
+                for item in selected: item.x = left
+            elif operation == "hcenter":
+                center = (left + right) / 2
+                for item in selected: item.x = center - item.width / 2
+            elif operation == "right":
+                for item in selected: item.x = right - item.width
+            elif operation == "top":
+                for item in selected: item.y = top
+            elif operation == "vcenter":
+                center = (top + bottom) / 2
+                for item in selected: item.y = center - item.height / 2
+            elif operation == "bottom":
+                for item in selected: item.y = bottom - item.height
+            elif operation == "distribute_h":
+                ordered = sorted(selected, key=lambda item: item.x)
+                gap = (right - left - sum(item.width for item in ordered)) / (len(ordered) - 1)
+                cursor = left
+                for item in ordered: item.x, cursor = cursor, cursor + item.width + gap
+            else:
+                ordered = sorted(selected, key=lambda item: item.y)
+                gap = (bottom - top - sum(item.height for item in ordered)) / (len(ordered) - 1)
+                cursor = top
+                for item in ordered: item.y, cursor = cursor, cursor + item.height + gap
+        return self.mutate(apply)
+
     def set_flag(self, element_ids: Iterable[str], name: str, value: bool) -> bool:
         selected = set(element_ids)
         return self.mutate(lambda theme: [setattr(item, name, bool(value)) for item in theme.elements if item.id in selected])
@@ -373,6 +412,7 @@ class SensorThemeDocument(QObject):
         if self.theme is None:
             return
         references = {value for element in self.theme.elements for value in (element.asset, element.font_file) if value}
+        if self.theme.background_asset: references.add(self.theme.background_asset)
         for reference in references:
             source = self.asset_root.joinpath(*reference.split("/")) if self.asset_root else None
             target = destination.joinpath(*reference.split("/"))
@@ -449,10 +489,34 @@ class SensorThemeDocument(QObject):
         preview = (renderer or SensorThemeRenderer()).thumbnail(self.theme, SAMPLE_SENSOR_VALUES, asset_root=self.asset_root)
         return export_theme_package(self.theme, path, asset_root=self.asset_root, preview=preview)
 
+    def import_json(self, path: Path) -> SensorTheme:
+        path=Path(path)
+        if not path.is_file() or path.stat().st_size>2*1024*1024:raise ThemeValidationError("layout JSON is missing or exceeds 2 MB")
+        try:raw=json.loads(path.read_text(encoding="utf-8"))
+        except (OSError,UnicodeError,json.JSONDecodeError) as exc:raise ThemeValidationError(f"invalid layout JSON: {exc}") from exc
+        theme=SensorTheme.from_dict(raw);self.theme=theme;self.asset_root=path.parent;self.built_in=False
+        snapshot=theme.to_dict();self._history=[deepcopy(snapshot)];self._history_index=0;self._saved_signature=_theme_signature(theme);self._saved_raw=deepcopy(snapshot);self.themeChanged.emit(theme);self._emit_state();return theme
+
+    def export_json(self, path: Path) -> Path:
+        if self.theme is None:
+            raise ThemeValidationError("no layout is open")
+        target = Path(path)
+        if target.suffix.casefold() != ".json":
+            target = target.with_suffix(".json")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._copy_resources(target.parent)
+        target.write_text(json.dumps(self.theme.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def import_background(self, path: Path) -> str:
+        relative=self.add_resource_file(path)
+        self.mutate(lambda theme:(setattr(theme,"background_asset",relative),setattr(theme,"background_locked",True)))
+        return relative
+
 
 class SensorThemeElementItem(QGraphicsRectItem):
-    HANDLE_SIZE = 12
-    ROTATE_OFFSET = 28
+    HANDLE_SIZE = 20
+    ROTATE_OFFSET = 32
 
     def __init__(self, element: ThemeElement, editor_scene: "SensorThemeScene") -> None:
         super().__init__(0, 0, element.width, element.height)
@@ -481,6 +545,9 @@ class SensorThemeElementItem(QGraphicsRectItem):
 
     def boundingRect(self) -> QRectF:
         return self.rect().adjusted(-self.HANDLE_SIZE, -self.ROTATE_OFFSET - self.HANDLE_SIZE, self.HANDLE_SIZE, self.HANDLE_SIZE)
+
+    def shape(self) -> QPainterPath:
+        path=QPainterPath();path.addRect(self.boundingRect());return path
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.Antialiasing)
@@ -816,6 +883,7 @@ class SensorThemeProperties(QScrollArea):
         self._check("italic", "Italic"); self._combo("alignment", "Alignment", (("Left", "left"), ("Center", "center"), ("Right", "right")))
         self._combo("vertical_alignment", "Vertical align", (("Top", "top"), ("Middle", "middle"), ("Bottom", "bottom")))
         self._double("letter_spacing", "Letter spacing", -50, 100, .5); self._color("text_color", "Text color")
+        self._double("padding", "Padding", 0, 1000); self._color("text_outline_color", "Outline color"); self._double("text_outline_width", "Outline width", 0, 100)
         self._line("time_format", "Time format"); self._line("date_format", "Date format")
 
         self._group(outer, "Appearance")
@@ -825,6 +893,10 @@ class SensorThemeProperties(QScrollArea):
         self._color("shadow_color", "Shadow color"); self._double("shadow_offset_x", "Shadow X", -100, 100)
         self._double("shadow_offset_y", "Shadow Y", -100, 100); self._double("shadow_blur", "Shadow blur", 0, 100)
         self._check("glow", "Glow"); self._color("glow_color", "Glow color"); self._double("glow_strength", "Glow strength", 0, 100)
+
+        self._group(outer, "Animation")
+        self._combo("animation", "Animation", (("None", "none"), ("Smooth", "smooth"), ("Fade", "fade"), ("Pulse", "pulse")))
+        self._double("animation_duration", "Duration", .05, 10, .05, 2)
 
         self._group(outer, "Sensor")
         self._sensor_combo(); self._line("unit", "Unit"); self._spin("decimal_precision", "Decimals", 0, 8)
@@ -952,6 +1024,7 @@ class SensorThemeEditorPage(QWidget):
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("oniSensorStudio")
         self.store = store or SensorThemeStore()
         self.document = SensorThemeDocument(self.store, self)
         self.live_value_provider = live_value_provider
@@ -959,90 +1032,245 @@ class SensorThemeEditorPage(QWidget):
         self.deployment_handler = deployment_handler
         self.prompt_handler = prompt_handler
         self.now_provider = now_provider
-        self._refresh_pending = False; self._nav_guard = False
-        root = QVBoxLayout(self); root.setContentsMargins(12, 10, 12, 10); root.setSpacing(8)
-        header = QHBoxLayout(); title = QLabel("Sensor Theme Studio"); title.setObjectName("pageTitle"); header.addWidget(title)
-        subtitle = QLabel("Visual LCD layout editor"); subtitle.setObjectName("pageSubtitle"); header.addWidget(subtitle); header.addStretch()
-        self.dirty_label = QLabel("Saved"); self.dirty_label.setObjectName("muted"); header.addWidget(self.dirty_label); root.addLayout(header)
+        self._refresh_pending = False
+        self._sensor_availability: dict[str, bool] = {}
 
-        toolbar = QHBoxLayout(); toolbar.setSpacing(5); self.actions: dict[str, QPushButton] = {}
-        for label, callback in (("New", self.new_theme), ("Open", self.open_theme), ("Save", self.save), ("Save As", self.save_as), ("Duplicate", self.duplicate_theme), ("Import", self.import_theme), ("Export", self.export_theme), ("Undo", self.document.undo), ("Redo", self.document.redo)):
-            button = QPushButton(label); button.setToolTip(f"{label} sensor theme"); button.clicked.connect(callback); toolbar.addWidget(button); self.actions[label] = button
-        toolbar.addStretch(); self.preset = QComboBox()
-        for key, label in DISPLAY_LABELS.items(): self.preset.addItem(label, key)
-        self.preset.setToolTip("Target LCD canvas; switching offers safe proportional scaling")
-        toolbar.addWidget(self.preset); self.preview_mode = QComboBox(); self.preview_mode.addItems(("Sample Data", "Missing Data", "Live Sensors")); self.preview_mode.setToolTip("Preview values only; never writes to a device")
-        toolbar.addWidget(self.preview_mode); root.addLayout(toolbar)
+        # Sensor Studio owns only editor state. Device sessions, transport and media
+        # ownership remain in the main application/runtime.
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
 
-        deployment = QHBoxLayout(); deployment.setSpacing(6); deployment.addWidget(QLabel("Deploy"))
-        self.apply_target = QComboBox(); self.apply_target.addItem("Display 1 · Trofeo Vision 9.16", ("0416:5408",)); self.apply_target.addItem("Display 2 · Trofeo Vision 6.86", ("0416:5302",)); self.apply_target.addItem("Both displays", ("0416:5408", "0416:5302"))
-        self.apply_fps = QComboBox()
-        for fps in (1, 2, 5, 10, 15, 30): self.apply_fps.addItem(f"{fps} FPS", fps)
-        self.apply_fps.setCurrentIndex(self.apply_fps.findData(2)); self.apply_button = QPushButton("Apply to Display"); self.apply_button.clicked.connect(self.apply_to_display)
-        self.active_status = QLabel("Not active"); self.active_status.setObjectName("muted")
-        deployment.addWidget(self.apply_target); deployment.addWidget(self.apply_fps); deployment.addWidget(self.apply_button); deployment.addWidget(self.active_status); deployment.addStretch(); root.addLayout(deployment)
+        # ---- title / document state -------------------------------------------------
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(0)
+        title = QLabel("ONI SENSOR STUDIO")
+        title.setObjectName("studioTitle")
+        subtitle = QLabel("Design the LCD exactly as it will appear on the panel")
+        subtitle.setObjectName("studioMuted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box)
+        header.addStretch(1)
+        self.dirty_label = QLabel("Saved")
+        self.dirty_label.setObjectName("studioState")
+        header.addWidget(self.dirty_label)
+        root.addLayout(header)
 
-        self.left_tabs = QTabWidget(); self.left_tabs.setMinimumWidth(230); self.left_tabs.setMaximumWidth(285)
-        themes_page = QWidget(); themes_layout = QVBoxLayout(themes_page); themes_layout.setContentsMargins(4, 4, 4, 4)
-        self.theme_list = QListWidget(); self.theme_list.setViewMode(QListWidget.IconMode); self.theme_list.setResizeMode(QListWidget.Adjust); self.theme_list.setMovement(QListWidget.Static)
-        self.theme_list.setIconSize(QSize(210, 54)); self.theme_list.setGridSize(QSize(230, 112)); self.theme_list.setSpacing(4); themes_layout.addWidget(self.theme_list, 1)
+        # ---- compact command bar ----------------------------------------------------
+        command = QFrame()
+        command.setObjectName("studioBar")
+        command_layout = QHBoxLayout(command)
+        command_layout.setContentsMargins(8, 7, 8, 7)
+        command_layout.setSpacing(6)
+        self.actions: dict[str, QPushButton] = {}
+        for label, callback in (
+            ("New", self.new_theme), ("Open", self.open_theme), ("Save", self.save),
+            ("Save As", self.save_as), ("Import JSON", self.import_theme),
+            ("Export JSON", self.export_theme), ("Undo", self.document.undo),
+            ("Redo", self.document.redo),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("studioCommand")
+            button.clicked.connect(callback)
+            command_layout.addWidget(button)
+            self.actions[label.replace(" JSON", "")] = button
+        # Compatibility keys used by history_changed and older tests/callers.
+        self.actions["Import"] = self.actions.get("Import", self.actions.get("Import JSON", button))
+        self.actions["Export"] = self.actions.get("Export", self.actions.get("Export JSON", button))
+        bg_button = QPushButton("Background")
+        bg_button.setObjectName("studioAccent")
+        bg_button.clicked.connect(self.import_background)
+        command_layout.addWidget(bg_button)
+        self.actions["Import Background"] = bg_button
+        command_layout.addStretch(1)
+        self.preset = QComboBox()
+        for key, label in DISPLAY_LABELS.items():
+            self.preset.addItem(label, key)
+        self.preset.setMinimumWidth(225)
+        command_layout.addWidget(self.preset)
+        self.preview_mode = QComboBox()
+        self.preview_mode.addItems(("Sample Data", "Live Sensors", "Missing Data"))
+        self.preview_mode.setMinimumWidth(125)
+        command_layout.addWidget(self.preview_mode)
+        root.addWidget(command)
+
+        # ---- left toolbox: only things users add/manage -----------------------------
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setObjectName("studioLeftTabs")
+        self.left_tabs.setMinimumWidth(270)
+        self.left_tabs.setMaximumWidth(330)
+
+        sensors_page = QWidget()
+        sensors_layout = QVBoxLayout(sensors_page)
+        sensors_layout.setContentsMargins(8, 10, 8, 8)
+        sensors_layout.setSpacing(7)
+        sensors_layout.addWidget(QLabel("SENSORS"))
+        sensor_help = QLabel("Search a sensor, then bind it to the selected widget.")
+        sensor_help.setWordWrap(True); sensor_help.setObjectName("studioMuted")
+        sensors_layout.addWidget(sensor_help)
+        self.sensor_search = QLineEdit(); self.sensor_search.setPlaceholderText("Search CPU, GPU, FPS, temperature…")
+        self.sensor_category = QComboBox(); self.sensor_category.addItems(("All", "CPU", "GPU", "Memory", "Storage", "Network", "Cooling", "Game/FPS"))
+        self.sensor_list = QListWidget(); self.sensor_list.setObjectName("studioBrowser")
+        self.sensor_bind_button = QPushButton("Bind sensor to selected widget"); self.sensor_bind_button.setObjectName("studioAccent")
+        self.sensor_refresh_button = QPushButton("Refresh availability")
+        sensors_layout.addWidget(self.sensor_search); sensors_layout.addWidget(self.sensor_category)
+        sensors_layout.addWidget(self.sensor_list, 1); sensors_layout.addWidget(self.sensor_bind_button); sensors_layout.addWidget(self.sensor_refresh_button)
+
+        elements_page = QWidget()
+        elements_layout = QVBoxLayout(elements_page); elements_layout.setContentsMargins(8, 10, 8, 8); elements_layout.setSpacing(7)
+        elements_layout.addWidget(QLabel("WIDGETS"))
+        widget_help = QLabel("Drag a widget onto the LCD, or double-click to add it.")
+        widget_help.setWordWrap(True); widget_help.setObjectName("studioMuted"); elements_layout.addWidget(widget_help)
+        self.palette = ElementPalette(); self.palette.setObjectName("studioBrowser"); elements_layout.addWidget(self.palette, 1)
+        add_button = QPushButton("Add selected widget"); add_button.setObjectName("studioAccent"); add_button.clicked.connect(self.add_selected_palette); elements_layout.addWidget(add_button)
+
+        layers_page = QWidget()
+        layers_layout = QVBoxLayout(layers_page); layers_layout.setContentsMargins(8, 10, 8, 8); layers_layout.setSpacing(7)
+        layers_layout.addWidget(QLabel("LAYERS"))
+        self.layers = QListWidget(); self.layers.setObjectName("studioBrowser"); self.layers.setSelectionMode(QAbstractItemView.ExtendedSelection); layers_layout.addWidget(self.layers, 1)
+        layer_actions = QHBoxLayout()
+        for label, callback in (("Copy", self.copy_selected), ("Paste", self.paste), ("Delete", self.delete_selected)):
+            b = QPushButton(label); b.clicked.connect(callback); layer_actions.addWidget(b)
+        layers_layout.addLayout(layer_actions)
+        order_actions = QHBoxLayout()
+        for label, operation in (("Front", "front"), ("Forward", "forward"), ("Back", "back")):
+            b = QPushButton(label); b.clicked.connect(lambda _checked=False, op=operation: self.reorder(op)); order_actions.addWidget(b)
+        layers_layout.addLayout(order_actions)
+        flags = QHBoxLayout()
+        show_hide = QPushButton("Show / Hide"); show_hide.clicked.connect(self.toggle_visibility)
+        lock_unlock = QPushButton("Lock / Unlock"); lock_unlock.clicked.connect(self.toggle_lock)
+        flags.addWidget(show_hide); flags.addWidget(lock_unlock); layers_layout.addLayout(flags)
+        align_button = QToolButton(); align_button.setText("Align / Distribute ▾"); align_button.setPopupMode(QToolButton.InstantPopup)
+        align_menu = QMenu(align_button)
+        for label, operation in (("Align left", "left"), ("Align centers", "hcenter"), ("Align right", "right"), ("Align top", "top"), ("Align middle", "vcenter"), ("Align bottom", "bottom"), ("Distribute horizontally", "distribute_h"), ("Distribute vertically", "distribute_v")):
+            align_menu.addAction(label, lambda _checked=False, value=operation: self.align_selected(value))
+        align_button.setMenu(align_menu); layers_layout.addWidget(align_button)
+
+        themes_page = QWidget()
+        themes_layout = QVBoxLayout(themes_page); themes_layout.setContentsMargins(8, 10, 8, 8); themes_layout.setSpacing(7)
+        themes_layout.addWidget(QLabel("LAYOUTS"))
+        self.theme_list = QListWidget(); self.theme_list.setObjectName("studioBrowser")
+        self.theme_list.setViewMode(QListWidget.IconMode); self.theme_list.setResizeMode(QListWidget.Adjust); self.theme_list.setMovement(QListWidget.Static)
+        self.theme_list.setIconSize(QSize(220, 56)); self.theme_list.setGridSize(QSize(240, 116)); self.theme_list.setSpacing(5); themes_layout.addWidget(self.theme_list, 1)
         theme_buttons = QHBoxLayout()
         for label, callback in (("Open", self.open_selected_browser_theme), ("Rename", self.rename_theme), ("Delete", self.delete_theme)):
-            button = QPushButton(label); button.clicked.connect(callback); theme_buttons.addWidget(button)
-        themes_layout.addLayout(theme_buttons); self.left_tabs.addTab(themes_page, "Themes")
+            b = QPushButton(label); b.clicked.connect(callback); theme_buttons.addWidget(b)
+        themes_layout.addLayout(theme_buttons)
 
-        elements_page = QWidget(); elements_layout = QVBoxLayout(elements_page); elements_layout.setContentsMargins(4, 4, 4, 4)
-        elements_layout.addWidget(QLabel("Double-click or drag an element onto the canvas.")); self.palette = ElementPalette(); elements_layout.addWidget(self.palette, 1)
-        add_button = QPushButton("Add selected element"); add_button.clicked.connect(self.add_selected_palette); elements_layout.addWidget(add_button); self.left_tabs.addTab(elements_page, "Elements")
-
-        layers_page = QWidget(); layers_layout = QVBoxLayout(layers_page); layers_layout.setContentsMargins(4, 4, 4, 4)
-        self.layers = QListWidget(); self.layers.setSelectionMode(QAbstractItemView.ExtendedSelection); layers_layout.addWidget(self.layers, 1)
-        for labels in ((("Copy", self.copy_selected), ("Paste", self.paste), ("Delete", self.delete_selected)), (("Front", lambda: self.reorder("front")), ("Forward", lambda: self.reorder("forward")), ("Backward", lambda: self.reorder("backward")), ("Back", lambda: self.reorder("back"))), (("Show/Hide", self.toggle_visibility), ("Lock/Unlock", self.toggle_lock))):
-            row = QHBoxLayout()
-            for label, callback in labels:
-                button = QPushButton(label); button.clicked.connect(callback); row.addWidget(button)
-            layers_layout.addLayout(row)
+        self.left_tabs.addTab(sensors_page, "Sensors")
+        self.left_tabs.addTab(elements_page, "Widgets")
         self.left_tabs.addTab(layers_page, "Layers")
+        self.left_tabs.addTab(themes_page, "Layouts")
 
-        center = QWidget(); center_layout = QVBoxLayout(center); center_layout.setContentsMargins(0, 0, 0, 0); center_layout.setSpacing(5)
-        self.scene = SensorThemeScene(self.document, self, now_provider=now_provider); self.canvas = SensorThemeCanvasView(self.scene); center_layout.addWidget(self.canvas, 1)
-        canvas_bar = QHBoxLayout(); self.grid_toggle = QCheckBox("Grid"); self.grid_toggle.setChecked(True); self.snap_toggle = QCheckBox("Snap"); self.snap_toggle.setChecked(True); self.guides_toggle = QCheckBox("Guides"); self.guides_toggle.setChecked(True)
-        self.grid_size = QSpinBox(); self.grid_size.setRange(2, 200); self.grid_size.setValue(40); self.grid_size.setSuffix(" px")
-        fit = QPushButton("Fit"); minus = QPushButton("−"); plus = QPushButton("+"); fit.clicked.connect(self.fit_canvas); minus.clicked.connect(lambda: self.canvas.zoom(.85)); plus.clicked.connect(lambda: self.canvas.zoom(1.15))
-        for widget in (self.grid_toggle, self.snap_toggle, self.guides_toggle, QLabel("Grid size"), self.grid_size): canvas_bar.addWidget(widget)
-        canvas_bar.addStretch(); canvas_bar.addWidget(minus); canvas_bar.addWidget(fit); canvas_bar.addWidget(plus); center_layout.addLayout(canvas_bar)
+        # ---- center: the LCD is the workspace, not a tiny thumbnail -----------------
+        center = QFrame(); center.setObjectName("studioCanvasPanel")
+        center_layout = QVBoxLayout(center); center_layout.setContentsMargins(10, 10, 10, 8); center_layout.setSpacing(8)
+        canvas_header = QHBoxLayout()
+        canvas_header.addWidget(QLabel("LCD CANVAS"))
+        self.selection_status = QLabel("No selection"); self.selection_status.setObjectName("studioMuted"); canvas_header.addWidget(self.selection_status)
+        canvas_header.addStretch(1)
+        self.grid_toggle = QCheckBox("Grid"); self.grid_toggle.setChecked(True)
+        self.snap_toggle = QCheckBox("Snap"); self.snap_toggle.setChecked(True)
+        self.guides_toggle = QCheckBox("Guides"); self.guides_toggle.setChecked(True)
+        self.grid_size = QSpinBox(); self.grid_size.setRange(2, 200); self.grid_size.setValue(20); self.grid_size.setSuffix(" px")
+        for widget in (self.grid_toggle, self.snap_toggle, self.guides_toggle, self.grid_size): canvas_header.addWidget(widget)
+        center_layout.addLayout(canvas_header)
+        self.scene = SensorThemeScene(self.document, self, now_provider=now_provider)
+        self.canvas = SensorThemeCanvasView(self.scene); self.canvas.setObjectName("studioCanvas")
+        center_layout.addWidget(self.canvas, 1)
+        canvas_footer = QHBoxLayout()
+        minus = QPushButton("−"); fit = QPushButton("Fit Canvas"); plus = QPushButton("+")
+        minus.clicked.connect(lambda: self.canvas.zoom(.85)); fit.clicked.connect(self.fit_canvas); plus.clicked.connect(lambda: self.canvas.zoom(1.15))
+        canvas_footer.addStretch(1); canvas_footer.addWidget(minus); canvas_footer.addWidget(fit); canvas_footer.addWidget(plus)
+        center_layout.addLayout(canvas_footer)
 
-        self.properties = SensorThemeProperties(); self.splitter = QSplitter(Qt.Horizontal); self.splitter.setChildrenCollapsible(False)
-        self.splitter.addWidget(self.left_tabs); self.splitter.addWidget(center); self.splitter.addWidget(self.properties); self.splitter.setSizes([250, 850, 340]); root.addWidget(self.splitter, 1)
+        # ---- right: context-sensitive inspector + background + deploy ---------------
+        right = QFrame(); right.setObjectName("studioInspectorPanel"); right.setMinimumWidth(350); right.setMaximumWidth(430)
+        right_layout = QVBoxLayout(right); right_layout.setContentsMargins(10, 10, 10, 10); right_layout.setSpacing(9)
+        right_layout.addWidget(QLabel("INSPECTOR"))
+        self.properties = SensorThemeProperties(); self.properties.setObjectName("studioProperties"); right_layout.addWidget(self.properties, 1)
 
+        bg_group = QGroupBox("Background")
+        bg_form = QFormLayout(bg_group)
+        self.background_fit = QComboBox(); self.background_fit.addItems(("cover", "contain", "stretch", "center", "native"))
+        self.background_opacity = QSpinBox(); self.background_opacity.setRange(0, 100); self.background_opacity.setValue(100); self.background_opacity.setSuffix("%")
+        self.background_lock = QCheckBox("Lock background"); self.background_lock.setChecked(True)
+        bg_form.addRow("Fit", self.background_fit); bg_form.addRow("Opacity", self.background_opacity); bg_form.addRow("", self.background_lock)
+        right_layout.addWidget(bg_group)
+
+        deploy_group = QGroupBox("Apply to LCD")
+        deploy_form = QFormLayout(deploy_group)
+        self.apply_target = QComboBox(); self.apply_target.addItem("Trofeo Vision 9.16", ("0416:5408",)); self.apply_target.addItem("Trofeo Vision 6.86", ("0416:5302",)); self.apply_target.addItem("Both displays", ("0416:5408", "0416:5302"))
+        self.apply_fps = QComboBox()
+        for fps in (1, 2, 5, 10, 15, 30): self.apply_fps.addItem(f"{fps} FPS", fps)
+        self.apply_fps.setCurrentIndex(self.apply_fps.findData(2))
+        self.apply_button = QPushButton("Apply to Display"); self.apply_button.setObjectName("studioAccent"); self.apply_button.clicked.connect(self.apply_to_display)
+        self.active_status = QLabel("Not active"); self.active_status.setObjectName("studioMuted")
+        deploy_form.addRow("Target", self.apply_target); deploy_form.addRow("Refresh", self.apply_fps); deploy_form.addRow(self.apply_button); deploy_form.addRow(self.active_status)
+        right_layout.addWidget(deploy_group)
+
+        self.splitter = QSplitter(Qt.Horizontal); self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.left_tabs); self.splitter.addWidget(center); self.splitter.addWidget(right)
+        self.splitter.setStretchFactor(0, 0); self.splitter.setStretchFactor(1, 1); self.splitter.setStretchFactor(2, 0)
+        self.splitter.setSizes([290, 1040, 390]); root.addWidget(self.splitter, 1)
+
+        # Local Sensor Studio styling only; the application's global QSS is untouched.
+        self.setStyleSheet("""
+            QWidget#oniSensorStudio { background: #030912; color: #d8e9f6; }
+            QLabel#studioTitle { font-size: 20px; font-weight: 700; color: #f2fbff; }
+            QLabel#studioMuted { color: #7894a8; }
+            QLabel#studioState { color: #66d9ff; font-weight: 600; padding: 5px 10px; }
+            QFrame#studioBar, QFrame#studioCanvasPanel, QFrame#studioInspectorPanel {
+                background: #06111d; border: 1px solid #123149; border-radius: 8px;
+            }
+            QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
+                min-height: 28px; background: #0a1b2b; border: 1px solid #1a4766; border-radius: 5px; padding: 2px 8px; color: #d9edf8;
+            }
+            QPushButton:hover, QToolButton:hover { border-color: #25b9ef; background: #0d2639; }
+            QPushButton#studioAccent { background: #0879a8; border-color: #19bce8; color: white; font-weight: 600; }
+            QTabWidget#studioLeftTabs::pane { border: 1px solid #123149; background: #06111d; }
+            QTabBar::tab { background: #071522; border: 1px solid #123149; padding: 8px 10px; }
+            QTabBar::tab:selected { background: #0b2940; color: #6fe7ff; border-bottom: 2px solid #21c7f3; }
+            QListWidget#studioBrowser { background: #030a12; border: 1px solid #102b40; border-radius: 5px; }
+            QListWidget#studioBrowser::item { padding: 6px; border-bottom: 1px solid #0b2030; }
+            QListWidget#studioBrowser::item:selected { background: #0d3852; color: white; }
+            QGraphicsView#studioCanvas { background: #02060b; border: 1px solid #153b55; border-radius: 6px; }
+            QGroupBox { border: 1px solid #16384f; border-radius: 6px; margin-top: 10px; padding-top: 8px; font-weight: 600; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #7fdfff; }
+            QScrollArea#studioProperties { border: 0; background: transparent; }
+        """)
+
+        # ---- wiring -----------------------------------------------------------------
         self.palette.addRequested.connect(self.add_element); self.canvas.elementDropped.connect(self.add_element)
-        self.scene.selectionIdsChanged.connect(self.selection_changed); self.layers.itemSelectionChanged.connect(self.layer_selection_changed); self.layers.itemDoubleClicked.connect(lambda _item: self.layer_selection_changed())
+        self.scene.selectionIdsChanged.connect(self.selection_changed); self.layers.itemSelectionChanged.connect(self.layer_selection_changed)
+        self.layers.itemDoubleClicked.connect(lambda _item: self.layer_selection_changed())
         self.properties.propertyChanged.connect(self.apply_property); self.properties.resourceRequested.connect(self.choose_resource)
         self.document.themeChanged.connect(self.queue_document_refresh); self.document.dirtyChanged.connect(self.dirty_changed); self.document.historyChanged.connect(self.history_changed)
         self.preset.currentIndexChanged.connect(self.preset_changed); self.preview_mode.currentTextChanged.connect(self.preview_mode_changed)
         self.grid_toggle.toggled.connect(self.canvas_options_changed); self.snap_toggle.toggled.connect(self.canvas_options_changed); self.guides_toggle.toggled.connect(self.canvas_options_changed); self.grid_size.valueChanged.connect(self.canvas_options_changed)
         self.theme_list.itemDoubleClicked.connect(lambda _item: self.open_selected_browser_theme())
+        self.sensor_search.textChanged.connect(self.refresh_sensor_browser); self.sensor_category.currentTextChanged.connect(self.refresh_sensor_browser)
+        self.sensor_refresh_button.clicked.connect(self.refresh_sensor_availability); self.sensor_bind_button.clicked.connect(self.bind_selected_sensor); self.sensor_list.itemDoubleClicked.connect(lambda _item: self.bind_selected_sensor())
+        self.background_fit.currentTextChanged.connect(self.background_options_changed); self.background_opacity.valueChanged.connect(self.background_options_changed); self.background_lock.toggled.connect(self.background_options_changed)
         self.live_timer = QTimer(self); self.live_timer.setInterval(1000); self.live_timer.timeout.connect(self.refresh_live_values)
         QShortcut(QKeySequence.Undo, self, activated=self.document.undo); QShortcut(QKeySequence.Redo, self, activated=self.document.redo); QShortcut(QKeySequence.Save, self, activated=self.save)
+
         self.refresh_theme_browser()
-        initial = next((item for item in self.store.list_builtin() if item.theme.id == "oni-cyber-blue"), None)
-        if initial is None:
-            available = self.store.list_builtin() + self.store.list_user(); initial = available[0] if available else None
+        available = self.store.list_builtin() + self.store.list_user(); initial = available[0] if available else None
         if initial: self.document.load(initial)
         else: self.document.new("Untitled Theme")
+        self.refresh_sensor_browser()
         QTimer.singleShot(0, self.fit_canvas)
 
     def attach_navigation_guard(self, stack: QStackedWidget) -> None:
         self._navigation_stack = stack
-        stack.currentChanged.connect(self._navigation_changed)
 
-    def _navigation_changed(self, index: int) -> None:
-        if self._nav_guard: return
-        editor_index = self._navigation_stack.indexOf(self)
-        if editor_index < 0: return
-        previous = getattr(self, "_last_navigation_index", index); self._last_navigation_index = index
-        if previous == editor_index and index != editor_index and self.document.dirty and not self.confirm_unsaved("leave the Sensor Theme editor", revert_on_discard=True):
-            self._nav_guard = True; self._navigation_stack.setCurrentIndex(editor_index); self._nav_guard = False; self._last_navigation_index = editor_index
+    def request_leave(self) -> bool:
+        """Resolve unsaved state before the page stack changes."""
+        return self.confirm_unsaved("leave ONI Sensor Studio", revert_on_discard=True)
 
     def queue_document_refresh(self, _theme=None) -> None:
         if self._refresh_pending: return
@@ -1050,11 +1278,19 @@ class SensorThemeEditorPage(QWidget):
 
     def refresh_document(self) -> None:
         self._refresh_pending = False; selected = self.scene.selected_ids(); self.scene.reload(selected)
-        self.refresh_layers(); self.selection_changed(selected); self._sync_preset(); self.refresh_theme_browser(); self.canvas.fit_canvas()
+        self.refresh_layers(); self.selection_changed(selected); self._sync_preset()
 
     def _sync_preset(self) -> None:
         if self.document.theme is None: return
         self.preset.blockSignals(True); index = self.preset.findData(self.document.theme.canvas.preset); self.preset.setCurrentIndex(index if index >= 0 else self.preset.findData("custom")); self.preset.blockSignals(False)
+        for control in (self.background_fit,self.background_opacity,self.background_lock):control.blockSignals(True)
+        self.background_fit.setCurrentText(self.document.theme.background_fit);self.background_opacity.setValue(round(self.document.theme.background_opacity*100));self.background_lock.setChecked(self.document.theme.background_locked)
+        for control in (self.background_fit,self.background_opacity,self.background_lock):control.blockSignals(False)
+
+    def background_options_changed(self, _value=None) -> None:
+        if self.document.theme is None:return
+        fit=self.background_fit.currentText();opacity=self.background_opacity.value()/100;locked=self.background_lock.isChecked()
+        self.document.mutate(lambda theme:(setattr(theme,"background_fit",fit),setattr(theme,"background_opacity",opacity),setattr(theme,"background_locked",locked)))
 
     def dirty_changed(self, dirty: bool) -> None:
         name = self.document.theme.name if self.document.theme else "No theme"
@@ -1069,6 +1305,7 @@ class SensorThemeEditorPage(QWidget):
 
     def selection_changed(self, element_ids: Iterable[str]) -> None:
         ids = list(element_ids); element = self.document.element(ids[0]) if len(ids) == 1 else None; self.properties.set_element(element)
+        self.selection_status.setText(f"X {element.x:g} · Y {element.y:g} · W {element.width:g} · H {element.height:g} · {element.sensor_binding or 'No sensor'}" if element else f"{len(ids)} selected" if ids else "No selection")
         self.layers.blockSignals(True)
         for index in range(self.layers.count()): self.layers.item(index).setSelected(self.layers.item(index).data(Qt.UserRole) in ids)
         self.layers.blockSignals(False)
@@ -1105,6 +1342,36 @@ class SensorThemeEditorPage(QWidget):
             item.setData(Qt.UserRole, stored.theme.id); item.setData(Qt.UserRole + 1, stored.built_in); self.theme_list.addItem(item)
             if stored.theme.id == current_id: self.theme_list.setCurrentItem(item)
         self.theme_list.blockSignals(False)
+
+    def refresh_sensor_browser(self, _value=None) -> None:
+        needle=self.sensor_search.text().casefold() if hasattr(self,"sensor_search") else "";category=self.sensor_category.currentText() if hasattr(self,"sensor_category") else "All"
+        self.sensor_list.clear()
+        for binding,label in FRIENDLY_SENSOR_NAMES.items():
+            prefix=binding.split(".",1)[0]
+            group="Game/FPS" if prefix=="game" else prefix.upper() if prefix in {"cpu","gpu"} else prefix.title()
+            if category!="All" and group!=category:continue
+            if needle and needle not in f"{label} {binding}".casefold():continue
+            availability=self._sensor_availability.get(binding)
+            status="Available" if availability is True else "Unavailable" if availability is False else "Not checked"
+            item=QListWidgetItem(f"{label}\n{binding} · {status}");item.setData(Qt.UserRole,binding);self.sensor_list.addItem(item)
+
+    def refresh_sensor_availability(self) -> None:
+        if self.live_value_provider is None:
+            self._sensor_availability = {binding: False for binding in SUPPORTED_SENSOR_BINDINGS}
+        else:
+            try:
+                supplied = self.live_value_provider(); values = supplied if isinstance(supplied, dict) else getattr(supplied, "values", supplied)
+                resolver = SensorBindingResolver(); self._sensor_availability = {binding: resolver.resolve(binding, values).available for binding in SUPPORTED_SENSOR_BINDINGS}
+            except Exception:
+                self._sensor_availability = {binding: False for binding in SUPPORTED_SENSOR_BINDINGS}
+        self.refresh_sensor_browser()
+
+    def bind_selected_sensor(self) -> bool:
+        item=self.sensor_list.currentItem();ids=self.selected_ids()
+        if item is None or len(ids)!=1:return False
+        element=self.document.element(ids[0])
+        if element is None or "sensor_binding" not in applicable_element_fields(element.type):return False
+        return self.document.set_property(element.id,"sensor_binding",item.data(Qt.UserRole))
 
     def confirm_unsaved(self, action: str, *, revert_on_discard: bool = False) -> bool:
         if not self.document.dirty: return True
@@ -1184,17 +1451,29 @@ class SensorThemeEditorPage(QWidget):
 
     def import_theme(self) -> bool:
         if not self.confirm_unsaved("import a theme"): return False
-        path, _ = QFileDialog.getOpenFileName(self, "Import sensor theme", "", "Oni Sensor Theme (*.oni-theme)")
+        path, _ = QFileDialog.getOpenFileName(self, "Import sensor layout", "", "ONI Layout JSON (*.json);;Oni Sensor Theme (*.oni-theme)")
         if not path: return False
-        try: self.document.import_package(Path(path)); self.refresh_theme_browser(); return True
+        try:
+            if Path(path).suffix.casefold()==".json":self.document.import_json(Path(path))
+            else:self.document.import_package(Path(path))
+            self.refresh_theme_browser();return True
         except Exception as exc: QMessageBox.critical(self, "Could not import theme", str(exc)); return False
 
     def export_theme(self) -> bool:
         if self.document.theme is None: return False
-        path, _ = QFileDialog.getSaveFileName(self, "Export sensor theme", f"{self.document.theme.id}.oni-theme", "Oni Sensor Theme (*.oni-theme)")
+        path, selected = QFileDialog.getSaveFileName(self, "Export sensor layout", f"{self.document.theme.id}.json", "ONI Layout JSON (*.json);;Oni Sensor Theme Package (*.oni-theme)")
         if not path: return False
-        try: self.document.export_package(Path(path), self.scene.renderer); return True
+        try:
+            if Path(path).suffix.casefold()==".oni-theme" or "Package" in selected:self.document.export_package(Path(path),self.scene.renderer)
+            else:self.document.export_json(Path(path))
+            return True
         except Exception as exc: QMessageBox.critical(self, "Could not export theme", str(exc)); return False
+
+    def import_background(self) -> bool:
+        path,_=QFileDialog.getOpenFileName(self,"Import dashboard background","","Images (*.png *.jpg *.jpeg *.webp)")
+        if not path:return False
+        try:self.document.import_background(Path(path));return True
+        except Exception as exc:QMessageBox.warning(self,"Could not import background",str(exc));return False
 
     def apply_to_display(self) -> bool:
         """Deploy a detached in-memory snapshot without implicitly saving it."""
@@ -1241,6 +1520,7 @@ class SensorThemeEditorPage(QWidget):
     def paste(self) -> None:
         created = self.document.paste(); QTimer.singleShot(0, lambda: self.scene.select_ids(created))
     def reorder(self, operation: str) -> None: self.document.reorder(self.selected_ids(), operation)
+    def align_selected(self, operation: str) -> None: self.document.align(self.selected_ids(), operation)
 
     def toggle_visibility(self) -> None:
         selected = [self.document.element(item) for item in self.selected_ids()]

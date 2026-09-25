@@ -46,8 +46,9 @@ def element(element_id: str = "value", element_type: str = "sensor_value", **cha
         "x": 0, "y": 0, "width": 120, "height": 60,
     }
     if element_type in {
-        "sensor_value", "sensor_label", "progress_bar", "horizontal_bar", "vertical_bar",
-        "ring_gauge", "arc_gauge", "line_graph",
+        "sensor_value", "sensor_label", "sensor_label_value", "value_unit", "fps", "frametime",
+        "progress_bar", "progress_indicator", "horizontal_bar", "vertical_bar",
+        "ring_gauge", "arc_gauge", "line_graph", "area_graph",
     }:
         raw["sensor_binding"] = "cpu.usage"
     if element_type in {"image", "icon"}:
@@ -76,8 +77,9 @@ class SensorThemeModelTests(unittest.TestCase):
 
     def test_every_initial_element_type_is_supported(self):
         self.assertEqual(ELEMENT_TYPES, {
-            "text", "sensor_value", "sensor_label", "image", "icon", "progress_bar",
-            "horizontal_bar", "vertical_bar", "ring_gauge", "arc_gauge", "line_graph", "clock", "date",
+            "text", "sensor_value", "sensor_label", "sensor_label_value", "value_unit", "fps", "frametime",
+            "image", "icon", "progress_bar", "progress_indicator", "horizontal_bar", "vertical_bar",
+            "ring_gauge", "arc_gauge", "line_graph", "area_graph", "clock", "date",
         })
         for index, kind in enumerate(sorted(ELEMENT_TYPES)):
             self.assertEqual(element(f"element-{index}", kind).type, kind)
@@ -102,6 +104,12 @@ class SensorThemeModelTests(unittest.TestCase):
         duplicate = element("same")
         with self.assertRaisesRegex(ThemeValidationError, "duplicate"):
             theme([duplicate, element("same", "text")])
+        with self.assertRaisesRegex(ThemeValidationError, "unsafe"):
+            SensorTheme.from_dict({**theme().to_dict(), "background_asset": "../private.png"})
+        with self.assertRaisesRegex(ThemeValidationError, "animation"):
+            element("bad-animation", "text", animation="execute")
+        with self.assertRaisesRegex(ThemeValidationError, "padding"):
+            element("bad-padding", "text", padding=-1)
 
     def test_schema_zero_migration(self):
         migrated = SensorTheme.from_dict({
@@ -178,6 +186,22 @@ class SensorThemeRendererTests(unittest.TestCase):
         translucent = element("alpha", "image", width=20, height=20, asset="assets/sample.png", image_fit="stretch", opacity=.5)
         alpha_image = SensorThemeRenderer().render(theme([translucent], canvas=ThemeCanvas(20, 20)), {}, asset_root=self.root)
         self.assertLess(alpha_image.getpixel((10, 10))[0], 255)
+
+    def test_shared_clock_drives_animation_without_widget_timers(self):
+        animated = element("pulse", "text", text="ONI", animation="pulse", animation_duration=1)
+        sample = theme([animated], canvas=ThemeCanvas(160, 80))
+        dim = SensorThemeRenderer().render(sample, {}, now=datetime(2026, 1, 2, 3, 4, 5, 0))
+        bright = SensorThemeRenderer().render(sample, {}, now=datetime(2026, 1, 2, 3, 4, 5, 500000))
+        self.assertNotEqual(dim.tobytes(), bright.tobytes())
+
+    def test_smooth_animation_interpolates_sensor_values(self):
+        animated = element("smooth", "sensor_value", animation="smooth", animation_duration=1, decimal_precision=0)
+        sample = theme([animated], canvas=ThemeCanvas(160, 80)); renderer = SensorThemeRenderer()
+        renderer.render(sample, {"cpu.usage": 0}, now=datetime(2026, 1, 2, 3, 4, 5)).close()
+        changed = renderer.render(sample, {"cpu.usage": 100}, now=datetime(2026, 1, 2, 3, 4, 5, 100000))
+        halfway = renderer.render(sample, {"cpu.usage": 100}, now=datetime(2026, 1, 2, 3, 4, 5, 600000))
+        final = renderer.render(sample, {"cpu.usage": 100}, now=datetime(2026, 1, 2, 3, 4, 6, 100000))
+        self.assertNotEqual(changed.tobytes(), halfway.tobytes()); self.assertNotEqual(halfway.tobytes(), final.tobytes())
         bordered = element("border", "horizontal_bar", width=30, height=20, border_color="#00FF00", border_width=2)
         border_image = SensorThemeRenderer().render(theme([bordered], canvas=ThemeCanvas(30, 20)), {"cpu.usage": 50})
         self.assertGreater(border_image.getpixel((0, 10))[1], 200)
@@ -197,20 +221,12 @@ class SensorThemeRendererTests(unittest.TestCase):
         SensorThemeRenderer().render(theme([element()]), {"cpu.usage": 50})
         self.assertEqual(state, {"opens": 0, "resets": 0, "disconnects": 0})
 
-    def test_builtins_render_exact_dimensions_with_missing_values(self):
+    def test_bundled_theme_library_is_empty_and_blank_theme_renders(self):
         store = SensorThemeStore(builtin_directory=ROOT / "assets" / "sensor-themes", user_directory=self.root / "user")
         builtins = store.list_builtin()
-        self.assertEqual({item.theme.name for item in builtins}, {"ONI Cyber Blue", "Minimal Dark", "Performance Rings", "Clean Hardware Monitor"})
-        renderer = SensorThemeRenderer()
-        for stored in builtins:
-            for item in stored.theme.elements:
-                self.assertGreaterEqual(item.x, 0)
-                self.assertGreaterEqual(item.y, 0)
-                self.assertLessEqual(item.x + item.width, stored.theme.canvas.width)
-                self.assertLessEqual(item.y + item.height, stored.theme.canvas.height)
-            for preset, size in (("0416:5408", (1920, 462)), ("0416:5302", (1280, 480))):
-                rendered = renderer.render(stored.theme, {}, output_size=preset)
-                self.assertEqual(rendered.size, size)
+        self.assertEqual(builtins, [])
+        blank = store.create("Blank", preset="0416:5408"); self.assertEqual(blank.elements, [])
+        self.assertEqual(SensorThemeRenderer().render(blank, {}).size, (1920, 462))
 
 
 class SensorThemePackageTests(unittest.TestCase):
@@ -294,8 +310,7 @@ class SensorThemeStoreTests(unittest.TestCase):
             store.delete(duplicate.id)
             with self.assertRaises(KeyError):
                 store.get(duplicate.id)
-            with self.assertRaises(ThemeValidationError):
-                store.delete("minimal-dark")
+            self.assertEqual(store.list_builtin(), [])
 
     def test_default_user_storage_is_local_app_data(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"LOCALAPPDATA": folder}):

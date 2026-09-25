@@ -36,6 +36,7 @@ class SensorThemeRenderer:
     def __init__(self, resolver: SensorBindingResolver | None = None) -> None:
         self.resolver = resolver or SensorBindingResolver()
         self._font_cache: dict[tuple[str, int, int, bool], ImageFont.ImageFont] = {}
+        self._smooth_values: dict[str, tuple[float, float, float]] = {}
         self.render_count = 0
 
     def render(
@@ -53,13 +54,30 @@ class SensorThemeRenderer:
         asset_root = Path(asset_root) if asset_root is not None else None
         now = now or datetime.now()
         canvas = Image.new("RGBA", (theme.canvas.width, theme.canvas.height), _rgba(theme.background_color))
+        if theme.background_asset and asset_root is not None:
+            background_path = asset_root.joinpath(*theme.background_asset.split("/"))
+            try:
+                with Image.open(background_path) as source:
+                    background = self._background_layer(source.convert("RGBA"), canvas.size, theme.background_fit)
+                if theme.background_opacity < 1:
+                    background.putalpha(background.getchannel("A").point(lambda value: round(value * theme.background_opacity)))
+                canvas.alpha_composite(background)
+                background.close()
+            except (OSError, ValueError):
+                pass
         for element in sorted(theme.elements, key=lambda item: item.z_index):
             if not element.visible:
                 continue
             sensor = self.resolver.resolve(element.sensor_binding, values) if element.sensor_binding else ResolvedSensor("", None)
             layer = self._element_layer(element, sensor, history or {}, asset_root, now)
-            if element.opacity < 1:
-                alpha = layer.getchannel("A").point(lambda value: round(value * element.opacity))
+            animated_opacity = element.opacity
+            if element.animation in {"fade", "pulse"}:
+                phase = (now.timestamp() % element.animation_duration) / element.animation_duration
+                wave = (1 - math.cos(phase * math.tau)) / 2
+                floor = .25 if element.animation == "fade" else .65
+                animated_opacity *= floor + (1 - floor) * wave
+            if animated_opacity < 1:
+                alpha = layer.getchannel("A").point(lambda value: round(value * animated_opacity))
                 layer.putalpha(alpha)
             if element.rotation % 360:
                 layer = layer.rotate(-element.rotation, expand=True, resample=Image.Resampling.BICUBIC)
@@ -96,6 +114,19 @@ class SensorThemeRenderer:
         out.alpha_composite(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
         return out
 
+    @staticmethod
+    def _background_layer(source: Image.Image, size: tuple[int, int], mode: str) -> Image.Image:
+        width,height=size
+        if mode=="stretch":return source.resize(size,Image.Resampling.LANCZOS)
+        if mode in {"center","native"}:
+            out=Image.new("RGBA",size,(0,0,0,0));out.alpha_composite(source,((width-source.width)//2,(height-source.height)//2));return out
+        ratio=max(width/source.width,height/source.height) if mode=="cover" else min(width/source.width,height/source.height)
+        resized=source.resize((max(1,round(source.width*ratio)),max(1,round(source.height*ratio))),Image.Resampling.LANCZOS)
+        if mode=="cover":
+            left,top=(resized.width-width)//2,(resized.height-height)//2
+            return resized.crop((left,top,left+width,top+height))
+        out=Image.new("RGBA",size,(0,0,0,0));out.alpha_composite(resized,((width-resized.width)//2,(height-resized.height)//2));return out
+
     def _element_layer(
         self, element: ThemeElement, sensor: ResolvedSensor, history: Mapping[str, Sequence[object]],
         asset_root: Path | None, now: datetime,
@@ -103,27 +134,31 @@ class SensorThemeRenderer:
         size = (max(1, round(element.width)), max(1, round(element.height)))
         layer = Image.new("RGBA", size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(layer, "RGBA")
+        if element.animation == "smooth":
+            sensor = self._smooth_sensor(element, sensor, now)
         radius = max(0, round(min(element.corner_radius, min(size) / 2)))
         if element.background_color != "transparent":
             draw.rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius, fill=_rgba(element.background_color))
 
-        if element.type in {"text", "sensor_value", "sensor_label", "clock", "date"}:
+        if element.type in {"text", "sensor_value", "sensor_label", "sensor_label_value", "value_unit", "clock", "date", "fps", "frametime"}:
             if element.type == "text":
                 text = element.text
             elif element.type == "sensor_label":
                 text = element.text or sensor.label or element.sensor_binding
-            elif element.type == "sensor_value":
+            elif element.type in {"sensor_value", "value_unit", "fps", "frametime"}:
                 text = format_sensor_value(element, sensor)
+            elif element.type == "sensor_label_value":
+                text=f"{element.text or sensor.label or element.sensor_binding}  {format_sensor_value(element,sensor)}"
             elif element.type == "clock":
                 text = now.strftime(element.time_format)
             else:
                 text = now.strftime(element.date_format)
             self._draw_text(layer, element, text, asset_root)
-        elif element.type in {"progress_bar", "horizontal_bar", "vertical_bar"}:
+        elif element.type in {"progress_bar", "progress_indicator", "horizontal_bar", "vertical_bar"}:
             self._draw_bar(draw, element, sensor)
         elif element.type in {"ring_gauge", "arc_gauge"}:
             self._draw_gauge(draw, element, sensor)
-        elif element.type == "line_graph":
+        elif element.type in {"line_graph", "area_graph"}:
             self._draw_graph(draw, element, sensor, history)
         elif element.type in {"image", "icon"}:
             self._draw_image(layer, element, asset_root)
@@ -135,6 +170,31 @@ class SensorThemeRenderer:
             )
 
         return self._effects(layer, element)
+
+    def _smooth_sensor(self, element: ThemeElement, sensor: ResolvedSensor, now: datetime) -> ResolvedSensor:
+        if not sensor.available:
+            self._smooth_values.pop(element.id, None)
+            return sensor
+        try:
+            target = float(sensor.value)
+        except (TypeError, ValueError):
+            return sensor
+        timestamp = now.timestamp(); previous = self._smooth_values.get(element.id)
+        if previous is None:
+            self._smooth_values[element.id] = (target, target, timestamp)
+            return sensor
+        start_value, previous_target, started = previous
+        progress = max(0.0, min(1.0, (timestamp - started) / element.animation_duration))
+        current = start_value + (previous_target - start_value) * (progress * progress * (3 - 2 * progress))
+        if target != previous_target:
+            self._smooth_values[element.id] = (current, target, timestamp)
+            value = current
+        else:
+            value = current
+            if progress >= 1:
+                self._smooth_values[element.id] = (target, target, timestamp)
+                value = target
+        return ResolvedSensor(sensor.binding, value, sensor.unit, sensor.label, True)
 
     def _font(self, element: ThemeElement, asset_root: Path | None) -> ImageFont.ImageFont:
         size = max(1, round(element.font_size))
@@ -174,16 +234,18 @@ class SensorThemeRenderer:
             text_width = draw.textlength(text, font=font)
         bbox = draw.textbbox((0, 0), text or " ", font=font)
         text_height = bbox[3] - bbox[1]
-        x = 0 if element.alignment == "left" else (layer.width - text_width) / 2 if element.alignment == "center" else layer.width - text_width
-        y = -bbox[1] if element.vertical_alignment == "top" else (layer.height - text_height) / 2 - bbox[1] if element.vertical_alignment == "middle" else layer.height - text_height - bbox[1]
+        padding = min(element.padding, layer.width / 2, layer.height / 2)
+        x = padding if element.alignment == "left" else (layer.width - text_width) / 2 if element.alignment == "center" else layer.width - text_width - padding
+        y = padding - bbox[1] if element.vertical_alignment == "top" else (layer.height - text_height) / 2 - bbox[1] if element.vertical_alignment == "middle" else layer.height - text_height - padding - bbox[1]
         fill = _rgba(element.text_color)
+        stroke_width = max(0, round(element.text_outline_width)); stroke_fill = _rgba(element.text_outline_color)
         if spacing:
             cursor = x
             for character, width in zip(text, widths):
-                draw.text((cursor, y), character, font=font, fill=fill)
+                draw.text((cursor, y), character, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
                 cursor += width + spacing
         else:
-            draw.text((x, y), text, font=font, fill=fill)
+            draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
     @staticmethod
     def _ratio(element: ThemeElement, sensor: ResolvedSensor) -> float:

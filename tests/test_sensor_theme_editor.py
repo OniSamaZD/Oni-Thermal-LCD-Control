@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -31,14 +33,13 @@ class SensorThemeDocumentTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.store = SensorThemeStore(Path(self.temp.name) / "user", ROOT / "assets" / "sensor-themes")
         self.document = SensorThemeDocument(self.store)
-        self.document.load(self.store.get("oni-cyber-blue"))
+        self.document.new("Editor Fixture"); self.document.add_element("sensor_value"); self.document.save()
 
-    def test_builtin_theme_loads_and_cannot_be_overwritten(self):
-        self.assertTrue(self.document.built_in); self.assertEqual(self.document.theme.name, "ONI Cyber Blue")
-        with self.assertRaisesRegex(ValueError, "Save As"):
-            self.document.save()
+    def test_new_theme_is_blank_before_user_adds_content(self):
+        blank = SensorThemeDocument(self.store); blank.new("Blank")
+        self.assertFalse(blank.built_in); self.assertEqual(blank.theme.elements, [])
 
-    def test_duplicate_builtin_creates_editable_user_theme(self):
+    def test_duplicate_user_theme_creates_editable_user_theme(self):
         target = self.document.duplicate_theme("My ONI Copy")
         self.assertTrue(target.is_file()); self.assertFalse(self.document.built_in)
         self.assertEqual(self.store.get(self.document.theme.id).theme.name, "My ONI Copy")
@@ -56,7 +57,7 @@ class SensorThemeDocumentTests(unittest.TestCase):
     def test_dirty_add_delete_and_discard(self):
         self.assertFalse(self.document.dirty)
         element = self.document.add_element("text"); self.assertTrue(self.document.dirty)
-        self.document.delete([element.id]); self.assertEqual(len(self.document.theme.elements), 11)
+        self.document.delete([element.id]); self.assertEqual(len(self.document.theme.elements), 1)
         self.assertTrue(self.document.discard_changes()); self.assertFalse(self.document.dirty)
 
     def test_every_phase_one_element_type_can_be_added(self):
@@ -82,6 +83,43 @@ class SensorThemeDocumentTests(unittest.TestCase):
         edited = self.document.element(sensor.id)
         self.assertEqual(edited.sensor_binding, "gpu.power"); self.assertTrue(edited.locked); self.assertFalse(edited.visible)
         self.assertEqual(edited.z_index, max(item.z_index for item in self.document.theme.elements))
+
+    def test_alignment_uses_exact_canvas_coordinates(self):
+        self.document.new("Alignment", preset="custom", width=800, height=300)
+        first = self.document.add_element("text", (10, 20)); second = self.document.add_element("text", (310, 90))
+        self.document.set_property(first.id, "width", 100); self.document.set_property(second.id, "width", 200)
+        self.assertTrue(self.document.align([first.id, second.id], "left"))
+        self.assertEqual((self.document.element(first.id).x, self.document.element(second.id).x), (10, 10))
+        self.assertTrue(self.document.align([first.id, second.id], "vcenter"))
+        self.assertEqual(self.document.element(first.id).y, self.document.element(second.id).y)
+
+    def test_external_json_and_background_round_trip_preserves_exact_pixels(self):
+        for preset, dimensions in (("0416:5302", (1280, 480)), ("0416:5408", (1920, 462))):
+            with self.subTest(preset=preset):
+                self.document.new(f"Exact {preset}", preset=preset)
+                widget = self.document.add_element("sensor_label_value", (105, 82))
+                for name, value in (("width", 321), ("height", 77), ("sensor_binding", "gpu.temperature")):
+                    self.document.set_property(widget.id, name, value)
+                background = Path(self.temp.name) / f"{preset.replace(':', '-')}.png"
+                Image.new("RGB", dimensions, "#071522").save(background)
+                self.document.import_background(background)
+                exported = self.document.export_json(Path(self.temp.name) / f"{preset}.json")
+                loaded = SensorThemeDocument(self.store); loaded.import_json(exported)
+                restored = loaded.element(widget.id)
+                self.assertEqual((loaded.theme.canvas.width, loaded.theme.canvas.height), dimensions)
+                self.assertEqual((restored.x, restored.y, restored.width, restored.height), (105, 82, 321, 77))
+                self.assertEqual(restored.sensor_binding, "gpu.temperature")
+                self.assertTrue(loaded.theme.background_asset.startswith("assets/"))
+
+    def test_external_json_import_is_bounded_and_rejects_unknown_code_fields(self):
+        oversized = Path(self.temp.name) / "oversized.json"; oversized.write_bytes(b" " * (2 * 1024 * 1024 + 1))
+        with self.assertRaisesRegex(ValueError, "2 MB"):
+            self.document.import_json(oversized)
+        malicious = Path(self.temp.name) / "malicious.json"
+        raw = self.document.theme.to_dict(); raw["python"] = "__import__('os').system('echo unsafe')"
+        malicious.write_text(json.dumps(raw), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unknown theme properties"):
+            self.document.import_json(malicious)
 
     def test_copy_paste_duplicate_and_delete(self):
         source = self.document.theme.elements[0]; self.document.copy([source.id]); pasted = self.document.paste()
@@ -117,20 +155,21 @@ class SensorThemeEditorWidgetTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.store = SensorThemeStore(Path(self.temp.name) / "user", ROOT / "assets" / "sensor-themes")
+        fixture = SensorThemeDocument(self.store); fixture.new("Editor Fixture"); fixture.add_element("sensor_value"); fixture.save()
         self.page = SensorThemeEditorPage(self.store, prompt_handler=lambda _action: "discard")
         self.page.resize(1500, 850); self.page.show(); self.app.processEvents()
         self.addCleanup(self.page.close)
 
     def test_editor_opens_with_required_panels_and_toolbar(self):
-        self.assertEqual(self.page.document.theme.id, "oni-cyber-blue")
-        self.assertEqual([self.page.left_tabs.tabText(index) for index in range(3)], ["Themes", "Elements", "Layers"])
-        self.assertTrue({"New", "Open", "Save", "Save As", "Duplicate", "Import", "Export", "Undo", "Redo"}.issubset(self.page.actions))
+        self.assertEqual(self.page.document.theme.id, "editor-fixture")
+        self.assertEqual([self.page.left_tabs.tabText(index) for index in range(4)], ["Sensors", "Widgets", "Layers", "Layouts"])
+        self.assertTrue({"New", "Open", "Save", "Save As", "Import", "Export", "Undo", "Redo"}.issubset(self.page.actions))
         self.assertGreater(self.page.canvas.width(), 500); self.assertGreater(self.page.properties.width(), 280)
 
     def test_theme_browser_shows_builtin_metadata_and_thumbnails(self):
-        self.assertEqual(self.page.theme_list.count(), 4)
+        self.assertEqual(self.page.theme_list.count(), 1)
         first = self.page.theme_list.item(0)
-        self.assertIn("Built-in", first.text()); self.assertFalse(first.icon().isNull())
+        self.assertIn("User", first.text()); self.assertFalse(first.icon().isNull())
 
     def test_palette_layers_and_selection_handles(self):
         self.assertEqual(self.page.palette.count(), len(ELEMENT_TYPES))
@@ -162,18 +201,26 @@ class SensorThemeEditorWidgetTests(unittest.TestCase):
         self.assertEqual(self.page.document.element(element_id).text, "VISUAL EDIT")
         self.assertGreater(self.page.scene.renderer.render_count, before); self.assertFalse(pixmap.isNull())
 
+    def test_canvas_edit_does_not_refresh_layout_thumbnails_or_refit_canvas(self):
+        element_id = self.page.document.theme.elements[0].id
+        with patch.object(self.page, "refresh_theme_browser") as thumbnails, patch.object(self.page, "fit_canvas") as fit:
+            self.page.document.set_property(element_id, "x", 123)
+            self.app.processEvents()
+        thumbnails.assert_not_called(); fit.assert_not_called()
+
     def test_dirty_prompt_cancel_and_discard(self):
+        alternate = self.store.create("Alternate"); self.store.save(alternate)
         original = self.page.document.theme.id; self.page.document.add_element("text")
         self.page.prompt_handler = lambda _action: "cancel"
-        self.assertFalse(self.page.load_theme("minimal-dark")); self.assertEqual(self.page.document.theme.id, original)
+        self.assertFalse(self.page.load_theme("alternate")); self.assertEqual(self.page.document.theme.id, original)
         self.page.prompt_handler = lambda _action: "discard"
-        self.assertTrue(self.page.load_theme("minimal-dark")); self.assertEqual(self.page.document.theme.id, "minimal-dark")
+        self.assertTrue(self.page.load_theme("alternate")); self.assertEqual(self.page.document.theme.id, "alternate")
 
-    def test_dirty_navigation_cancel_keeps_editor_open(self):
+    def test_dirty_navigation_is_resolved_before_page_stack_changes(self):
         stack = QStackedWidget(); other = QWidget(); stack.addWidget(other); stack.addWidget(self.page); self.page.attach_navigation_guard(stack)
         stack.setCurrentWidget(self.page); self.app.processEvents(); self.page.document.add_element("text"); self.page.prompt_handler = lambda _action: "cancel"
-        stack.setCurrentWidget(other); self.app.processEvents()
-        self.assertIs(stack.currentWidget(), self.page)
+        self.assertFalse(self.page.request_leave());self.assertIs(stack.currentWidget(),self.page)
+        self.page.prompt_handler=lambda _action:"discard";self.assertTrue(self.page.request_leave());stack.setCurrentWidget(other);self.assertIs(stack.currentWidget(),other)
 
     def test_undo_redo_buttons_follow_history(self):
         self.page.document.add_element("clock"); self.app.processEvents()
@@ -194,6 +241,15 @@ class SensorThemeEditorWidgetTests(unittest.TestCase):
         self.page.preview_mode.setCurrentText("Live Sensors"); self.app.processEvents()
         self.assertTrue(calls); self.assertEqual(self.page.scene.values, SAMPLE_SENSOR_VALUES)
 
+    def test_sensor_browser_search_category_and_real_availability(self):
+        self.page.live_value_provider = lambda: {"cpu.usage": 42}
+        self.page.refresh_sensor_availability(); self.page.sensor_search.setText("CPU Usage")
+        self.assertEqual(self.page.sensor_list.count(), 1)
+        self.assertIn("Available", self.page.sensor_list.item(0).text())
+        self.page.sensor_search.clear(); self.page.sensor_category.setCurrentText("GPU")
+        self.assertGreater(self.page.sensor_list.count(), 1)
+        self.assertTrue(all("gpu." in self.page.sensor_list.item(index).text().casefold() for index in range(self.page.sensor_list.count())))
+
     def test_editor_module_has_no_transport_or_session_dependency(self):
         import thermalright_lcd.sensor_theme_editor as module
         source = inspect.getsource(module)
@@ -205,9 +261,32 @@ class SensorThemeEditorWidgetTests(unittest.TestCase):
         with patch.dict(os.environ, {"LOCALAPPDATA": self.temp.name}), patch("thermalright_lcd.gui.build_gui_sender", side_effect=lambda _device: DisabledHardwareSender()):
             window = MainWindow(); sessions = (window.left.session, window.right.session)
             window.open_theme_gallery(); self.app.processEvents()
-            self.assertIs(window.pages.currentWidget(), window.sensor_theme_editor)
+            self.assertIs(window.pages.currentWidget(), window.sensor_theme_workspace)
+            self.assertIs(window.sensor_theme_workspace.stack.currentWidget(), window.sensor_theme_workspace.browser)
+            self.assertTrue(window.open_sensor_studio()); self.app.processEvents()
+            self.assertIs(window.sensor_theme_workspace.stack.currentWidget(), window.sensor_theme_editor)
             self.assertEqual((window.left.session, window.right.session), sessions)
             window.shutdown()
+
+    def test_repeated_edit_home_save_discard_cancel_is_non_reentrant_and_preserves_runtime(self):
+        from thermalright_lcd.gui import MainWindow
+        with patch.dict(os.environ,{"LOCALAPPDATA":self.temp.name}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _device:DisabledHardwareSender()):
+            window=MainWindow();sessions=tuple(card.session for card in window.cards);window.open_theme_gallery();page=window.sensor_theme_editor
+            page.document.new("Navigation Stress","0416:5302");page.document.save();window.apply_sensor_theme(page.document.theme,page.document.asset_root,tuple(card.device_id for card in window.cards),1)
+            legitimate={window,window.tray_menu};before=set(QApplication.topLevelWidgets());started=time.monotonic()
+            for cycle in range(18):
+                self.assertTrue(window.open_sensor_studio(page.document.theme.id));page.document.add_element("text")
+                if cycle%3==0:
+                    page.prompt_handler=lambda _action:"cancel";self.assertFalse(window.select_page(0));self.assertIs(window.pages.currentWidget(),window.sensor_theme_workspace);self.assertIs(window.sensor_theme_workspace.stack.currentWidget(),page)
+                    page.prompt_handler=lambda _action:"discard";self.assertTrue(window.select_page(0))
+                elif cycle%3==1:
+                    page.prompt_handler=lambda _action:"discard";self.assertTrue(window.select_page(0))
+                else:
+                    self.assertTrue(page.save());page.prompt_handler=lambda _action:"cancel";self.assertTrue(window.select_page(0))
+                self.app.processEvents();self.assertEqual(tuple(card.session for card in window.cards),sessions)
+            self.assertLess(time.monotonic()-started,8)
+            unexpected=[widget for widget in set(QApplication.topLevelWidgets())-before if widget not in legitimate and widget.parent() is None]
+            self.assertFalse(unexpected,[(type(widget).__name__,widget.windowTitle()) for widget in unexpected]);window.shutdown()
 
 
 if __name__ == "__main__":

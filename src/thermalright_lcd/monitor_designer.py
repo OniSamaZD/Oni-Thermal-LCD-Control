@@ -511,6 +511,7 @@ class ThemeGalleryDialog(QDialog):
             if name in {"Gaming","Performance","Temperatures","Minimal"}:continue
             item=QListWidgetItem(self._icon(layout),name);item.setData(Qt.UserRole,name);item.setToolTip("Factory master remains unchanged; Apply creates an editable profile copy.");self.list.addItem(item)
         if self.list.count():self.list.setCurrentRow(0)
+        self.apply_button.setEnabled(bool(self.list.count()));self.edit_button.setEnabled(bool(self.list.count()))
     def selected_layout(self):
         item=self.list.currentItem();return deepcopy(templates(self.target.currentData())[item.data(Qt.UserRole)]) if item else None
     def apply(self):

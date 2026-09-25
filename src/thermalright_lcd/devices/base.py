@@ -22,3 +22,22 @@ class DeviceDefinition:
     full_frame_jpeg_required: bool = True
     dirty_region_protocol: bool = False
     transport_factory: str = ""
+    connection_type: str = "USB"
+    support_status: str = "Physically verified"
+    brightness_support: str = "software"
+    maximum_fps: int = 30
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceFamilyDefinition:
+    family_id: str
+    manufacturer: str
+    models: tuple[str, ...]
+    resolutions: tuple[tuple[int, int], ...]
+    connection_type: str
+    identifiers: tuple[str, ...]
+    support_status: str
+    protocol_reference: str
+    reference_license: str
+    output_enabled: bool = False
+    notes: str = ""

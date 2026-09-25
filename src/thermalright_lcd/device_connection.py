@@ -188,6 +188,9 @@ def _public_gui_configuration(device_id: str):
 
 def build_gui_sender(device_id: str, root: Path | None = None):
     """Build one validated sender for a reviewed public device definition."""
+    if device_id.startswith(("thermalright-ref:","community-ref:")):
+        from .reference_runtime import build_reference_sender
+        return build_reference_sender(device_id)
     root = root or application_root()
     if device_id not in REVIEWED_DEVICE_DEFINITIONS:return DisabledHardwareSender(f"Unsupported device definition: {device_id}")
     legacy = _legacy_gui_configuration(root, device_id)

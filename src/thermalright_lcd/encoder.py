@@ -34,6 +34,10 @@ def jpeg_payload(encoded: EncodedFrame) -> bytes:
 
 def reframe_encoded(encoded: EncodedFrame) -> EncodedFrame:
     """Build fresh per-commit USB/HID framing around the cached JPEG bytes."""
+    if encoded.protocol_profile.startswith("community-"):
+        # Community frame envelopes contain no mutable transaction counter.
+        # EncodedFrame and its byte writes are immutable and safe to resend.
+        return encoded
     jpeg=jpeg_payload(encoded)
     return encode_5408(jpeg,encoded.protocol_profile) if encoded.vid_pid=="0416:5408" else encode_5302(jpeg)
 
@@ -63,6 +67,24 @@ def encode_5302(jpeg: bytes) -> EncodedFrame:
     header=bytes.fromhex("dadbdcdd")+struct.pack("<IHHII",2,1280,480,2,len(jpeg))
     stream=header+jpeg; writes=tuple(stream[i:i+512].ljust(512,b"\0") for i in range(0,len(stream),512))
     return EncodedFrame("0416:5302",(1280,480),len(jpeg),hashlib.sha256(jpeg).hexdigest(),writes,"pid5302-command2")
+
+
+def encode_reference(model, *, jpeg: bytes | None = None, rgb565: bytes | None = None) -> EncodedFrame:
+    """Frame one positively identified reference model without affecting proven encoders."""
+    from .devices.thermalright_reference import frame_packets
+    raw = rgb565 if model.pixel_format.startswith("rgb565") else jpeg
+    if raw is None:raise ValueError(f"{model.pixel_format} payload is required")
+    writes=frame_packets(model,raw)
+    return EncodedFrame(model.key,model.render_size,len(raw),hashlib.sha256(raw).hexdigest(),writes,f"reference-{model.protocol}-{model.pixel_format}")
+
+
+def image_to_rgb565(image, byte_order: str = "little") -> bytes:
+    """Convert an RGB PIL image to packed RGB565 in the model's required byte order."""
+    import numpy as np
+    rgb=np.asarray(image.convert("RGB"),dtype=np.uint16)
+    values=((rgb[:,:,0]>>3)<<11)|((rgb[:,:,1]>>2)<<5)|(rgb[:,:,2]>>3)
+    dtype="<u2" if byte_order=="little" else ">u2"
+    return values.astype(dtype,copy=False).tobytes()
 
 
 def validate_5408(encoded: EncodedFrame) -> dict:

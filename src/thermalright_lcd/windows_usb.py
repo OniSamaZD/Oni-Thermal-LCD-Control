@@ -9,7 +9,7 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Protocol
 
-from .live_state import (DeviceDisconnected, TransportError, TransportStall,
+from .live_state import (DeviceDisconnected, TransportError, TransportStall, RealUsbTransport,
                          TransportTimeout, DeviceIdentity, SafetyError,
                          expected_identity, validate_identity)
 
@@ -165,3 +165,66 @@ def device_path_registered(target: dict) -> bool:
         key=fr"SYSTEM\CurrentControlSet\Control\DeviceClasses\{guid}\##?#{encoded}"
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,key): return True
     except OSError: return False
+
+
+def enumerate_registered_winusb_paths(vid_pid_pairs) -> tuple[tuple[str,str], ...]:
+    """Enumerate actual registered device-interface paths for exact VID/PIDs.
+
+    No handle is opened here.  We ask Configuration Manager for every interface
+    class registered under DeviceClasses and retain only exact USB identities;
+    the caller must still prove WinUSB binding and complete a protocol probe.
+    """
+    if not hasattr(ctypes,"WinDLL"):return ()
+    import uuid,winreg
+    class GUID(ctypes.Structure):
+        _fields_=[("Data1",wintypes.DWORD),("Data2",wintypes.WORD),("Data3",wintypes.WORD),("Data4",ctypes.c_ubyte*8)]
+    cfg=ctypes.WinDLL("cfgmgr32",use_last_error=True)
+    wanted={value.lower() for value in vid_pid_pairs};found={}
+    root=r"SYSTEM\CurrentControlSet\Control\DeviceClasses"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,root) as classes:
+            class_names=[winreg.EnumKey(classes,index) for index in range(winreg.QueryInfoKey(classes)[0])]
+    except OSError:return ()
+    for name in class_names:
+        try:
+            raw=uuid.UUID(name.strip("{}")).bytes_le;guid=GUID();ctypes.memmove(ctypes.byref(guid),raw,16);length=wintypes.ULONG()
+            if cfg.CM_Get_Device_Interface_List_SizeW(ctypes.byref(length),ctypes.byref(guid),None,0):continue
+            buffer=ctypes.create_unicode_buffer(length.value)
+            if cfg.CM_Get_Device_Interface_ListW(ctypes.byref(guid),None,buffer,length.value,0):continue
+        except (ValueError,OSError):continue
+        for path in (entry for entry in buffer[:].split("\0") if entry):
+            lowered=path.lower()
+            for vid_pid in wanted:
+                vid,pid=vid_pid.split(":")
+                if f"vid_{vid}&pid_{pid}" in lowered:found[path.lower()]=(vid_pid,path)
+    return tuple(found.values())
+
+
+def reference_winusb_connection(candidate, api=None):
+    """Bind one physically enumerated WinUSB interface and discover its real pipes."""
+    from .devices.thermalright_reference import ReferencePanelConnection
+    if str(candidate.service).upper()!="WINUSB":raise SafetyError("reference panel requires WinUSB service")
+    guid=str(candidate.interface_guid or "");path=str(candidate.device_path or "")
+    if not path:
+        if not guid:raise SafetyError("WinUSB interface GUID is unavailable")
+        path="\\\\?\\"+candidate.instance_id.replace("\\","#")+"#"+guid
+    api=api or CtypesWinUsbApi();handle=api.create_file(path,3000);usb=None
+    try:
+        usb=api.winusb_initialize(handle);outs=[];ins=[]
+        for ep in (*range(1,16),*range(0x81,0x90)):
+            try:
+                pipe=api.query_pipe(usb,0,ep)
+                if pipe["type"]==2:(ins if ep&0x80 else outs).append(ep)
+            except Exception:pass
+        if len(outs)!=1 or len(ins)!=1:raise SafetyError("reference WinUSB interface must expose exactly one bulk OUT and one bulk IN pipe")
+    finally:
+        if usb:api.free(usb)
+        api.close_handle(handle)
+    target={"vid_pid":candidate.vid_pid,"stable_instance_id":candidate.instance_id,"interface_instance_id":candidate.instance_id,
+            "container_id":candidate.container_id,"interface":0,"endpoint":f"0x{outs[0]:02x}","response_endpoint":f"0x{ins[0]:02x}",
+            "transfer_type":"bulk","driver":"WINUSB","confirmed_device_path":path,"host_payload_size":512,
+            "open_response":{"payload_size":1024}}
+    if not target["container_id"]:raise SafetyError("reference panel container identity is unavailable")
+    identity=lambda:discover_identity(target)
+    transport=RealUsbTransport(target,identity,api,4096,512*1024*1024)
+    return ReferencePanelConnection(candidate.vid_pid,"winusb",transport,target["endpoint"],target["response_endpoint"])

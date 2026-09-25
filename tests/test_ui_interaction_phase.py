@@ -52,6 +52,15 @@ class UiInteractionPhaseTests(unittest.TestCase):
         with patch("thermalright_lcd.gui.QFileDialog.getOpenFileName",return_value=("","")) as dialog:card.choose()
         self.assertEqual(dialog.call_args.args[3],media_filter(MediaKind.VIDEO));self.assertIs(card.selected_media_kind,MediaKind.VIDEO);card.shutdown()
 
+    def test_embedded_media_empty_state_and_add_change_actions(self):
+        with tempfile.TemporaryDirectory() as d:
+            photo=Path(d)/"photo.png";Image.new("RGB",(8,4),"green").save(photo);card=self.card()
+            self.assertIs(card.preview_stack.currentWidget(),card.media_empty_state);self.assertEqual(card.media_empty_title.text(),"Add Media")
+            self.assertEqual([card.media_empty_buttons[k].text() for k in (MediaKind.PHOTO,MediaKind.VIDEO,MediaKind.GIF)],["Photo","Video","GIF"])
+            self.assertEqual((card.footer_change.text(),card.choose_button.text()),("Add Media","Add Media"))
+            card.load(photo);self.assertIs(card.preview_stack.currentWidget(),card.preview);self.assertEqual((card.footer_change.text(),card.choose_button.text()),("Change Media","Change Media"))
+            card.clear();self.assertIs(card.preview_stack.currentWidget(),card.media_empty_state);self.assertEqual(card.footer_change.text(),"Add Media");card.shutdown()
+
     def test_drop_auto_detects_kind_and_unsupported_drop_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             photo=Path(d)/"photo.png";Image.new("RGB",(8,4),"green").save(photo);bad=Path(d)/"bad.txt";bad.write_text("no")
@@ -150,9 +159,9 @@ class UiInteractionPhaseTests(unittest.TestCase):
             photo=Path(d)/"photo.png";Image.new("RGB",(8,4),"green").save(photo);card=self.card();card.load(photo);profile=card.profile();self.assertEqual(profile.media_type,"photo")
             other=self.card();other.apply_profile(profile);self.assertIs(other.media_kind,MediaKind.PHOTO);self.assertTrue(other.fps.isHidden());card.shutdown();other.shutdown()
 
-    def test_selected_factory_preset_is_the_layout_opened_on_home(self):
+    def test_selected_user_layout_is_the_layout_opened_on_home(self):
         with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):
-            window=MainWindow();card=window.left;card.quick_edit.setChecked(True);card.monitor_template.setCurrentText("Gaming Dashboard");self.app.processEvents();self.assertEqual(card.home_quick_editor.layout.name,templates(card.device_id)["Gaming Dashboard"].name);window.shutdown()
+            window=MainWindow();card=window.left;layout=MonitorLayout("Desk Stats",card.device_id,*card.size_target,elements=[MonitorElement("static label",10,10,text="ONI")]);window.settings.monitor_layout_library.setdefault(card.device_id,{})[layout.name]=layout.to_dict();window._refresh_monitor_template_options(card);card.monitor_template.setCurrentText(layout.name);card.quick_edit.setChecked(True);self.app.processEvents();self.assertEqual(card.home_quick_editor.layout.name,"Desk Stats");window.shutdown()
 
 
 if __name__=="__main__":unittest.main()

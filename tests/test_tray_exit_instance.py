@@ -9,11 +9,11 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QRect, QSize, QTimer
 from PySide6.QtWidgets import QApplication
 
 from thermalright_lcd.device_connection import DisabledHardwareSender
-from thermalright_lcd.gui import MainWindow
+from thermalright_lcd.gui import MainWindow, SettingsDialog
 from thermalright_lcd.settings import AppSettings, SettingsStore
 from thermalright_lcd.single_instance import SingleInstance
 
@@ -37,6 +37,19 @@ class TrayExitInstanceTests(unittest.TestCase):
             window.restore_window();self.app.processEvents();self.assertTrue(window.isVisible());self.assertIs(window.tray,tray)
         self.assertEqual(timer_ids,tuple(id(x) for x in window.findChildren(QTimer)))
 
+    def test_geometry_recovery_handles_negative_monitors_and_stale_positions(self):
+        minimum=QSize(820,560);areas=[QRect(-1920,0,1920,1080),QRect(0,0,2560,1400)]
+        preserved=MainWindow._recover_window_rect(QRect(-1700,100,1400,800),areas,minimum);self.assertTrue(areas[0].contains(preserved))
+        recovered=MainWindow._recover_window_rect(QRect(9000,-5000,1600,900),areas,minimum);self.assertTrue(any(area.contains(recovered) for area in areas));self.assertEqual(recovered.center(),areas[1].center())
+        ultrawide=MainWindow._recover_window_rect(QRect(8000,100,4000,1300),[QRect(0,0,3440,1400)],minimum);self.assertLessEqual(ultrawide.width(),1900);self.assertLessEqual(ultrawide.height(),1100)
+        tiny_saved=MainWindow._recover_window_rect(QRect(-8,49,836,679),[QRect(0,0,5120,1400)],minimum,prefer_default_size=True);self.assertEqual((tiny_saved.width(),tiny_saved.height()),(1900,1100));self.assertEqual(tiny_saved.center(),QRect(0,0,5120,1400).center())
+
+    def test_show_open_recovers_offscreen_hidden_and_minimized_window(self):
+        window=self.make_window();window.show();self.app.processEvents();window.setGeometry(50000,-50000,1200,800);window.hide();window.tray_actions["Show / Open"].trigger();self.app.processEvents()
+        self.assertTrue(window.isVisible());self.assertFalse(window.isMinimized());self.assertTrue(any(screen.availableGeometry().intersects(window.frameGeometry()) for screen in QApplication.screens()))
+        window.showMinimized();self.app.processEvents();window.restore_window();self.app.processEvents();self.assertTrue(window.isVisible());self.assertFalse(window.isMinimized())
+        first=window.geometry();window.restore_window();self.app.processEvents();self.assertEqual(window.geometry(),first)
+
     def test_exit_behavior_and_explicit_exit_cleanup(self):
         window=self.make_window();window.settings.close_button_behavior="exit_application";window.show();window.close();self.app.processEvents()
         self.assertTrue(window._shutdown_done);self.assertFalse(window.tray.isVisible())
@@ -46,6 +59,16 @@ class TrayExitInstanceTests(unittest.TestCase):
     def test_diagnostics_are_on_demand_and_bounded(self):
         window=self.make_window();data=window.runtime_diagnostics()
         self.assertEqual(data["pid"],os.getpid());self.assertEqual(data["decoded_queue_sizes"],[0,0]);self.assertEqual(data["transport_queue_sizes"],[0,0]);self.assertEqual(data["active_playback_workers"],0);self.assertEqual(data["active_display_sessions"],0);self.assertEqual(data["retained_full_resolution_frames"],0)
+
+    def test_exported_device_diagnostics_are_actionable_and_path_free(self):
+        window=self.make_window()
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/"diagnostics.json";dialog=SettingsDialog(window.settings,tuple(window.cards),window)
+            with patch("thermalright_lcd.gui.QFileDialog.getSaveFileName",return_value=(str(target),"JSON (*.json)")):dialog.export_diagnostics()
+            data=json.loads(target.read_text(encoding="utf-8"));display=data["displays"][0]
+            for key in ("manufacturer","model","vid_pid","selected_adapter","support_status","transport","interface","out_endpoint","in_endpoint","orientation","frame_format","initialization_result","output_error"):
+                self.assertIn(key,display)
+            serialized=json.dumps(data);self.assertNotIn(str(Path.home()),serialized);self.assertNotIn("device_path",serialized.casefold())
 
     def test_close_setting_default_and_legacy_migration(self):
         self.assertEqual(AppSettings().close_button_behavior,"minimize_to_tray")

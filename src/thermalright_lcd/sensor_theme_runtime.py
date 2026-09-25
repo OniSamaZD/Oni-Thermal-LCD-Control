@@ -73,7 +73,7 @@ class SensorThemeOutputRuntime:
         if not state.rendered_once:
             return True
         return any(
-            element.visible and (bool(element.sensor_binding) or element.type in {"clock", "date", "line_graph"})
+            element.visible and (bool(element.sensor_binding) or element.type in {"clock", "date", "line_graph", "area_graph"} or element.animation != "none")
             for element in state.theme.elements
         )
 
@@ -91,7 +91,7 @@ class SensorThemeOutputRuntime:
         runtime_theme = SensorTheme.from_dict(deepcopy(theme.to_dict()))
         durations: dict[str, float] = {}
         for element in runtime_theme.elements:
-            if element.visible and element.type == "line_graph":
+            if element.visible and element.type in {"line_graph", "area_graph"}:
                 durations[element.sensor_binding] = max(
                     durations.get(element.sensor_binding, 0.0), float(element.history_duration),
                 )
@@ -139,7 +139,8 @@ class SensorThemeOutputRuntime:
         signature = self._signature(state, values, wall_time or datetime.now())
         has_graph = bool(state.history)
         has_time = any(element.visible and element.type in {"clock", "date"} for element in state.theme.elements)
-        if state.rendered_once and not has_graph and not has_time and signature == state.last_signature:
+        has_animation = any(element.visible and element.animation != "none" for element in state.theme.elements)
+        if state.rendered_once and not has_graph and not has_time and not has_animation and signature == state.last_signature:
             state.skipped_count += 1
             return None
         try:
