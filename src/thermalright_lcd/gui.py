@@ -38,6 +38,7 @@ from .media_types import MediaKind, detect_media_kind, media_filter
 from .device_discovery import DiscoveredDisplay, DisplayLifecycle, discover_supported_displays, simulated_reviewed_displays
 from .devices.registry import DEVICES, device_definition
 from .devices.catalog import catalog_models
+from .supported_displays import LiveDisplayState, catalog_live_states, filter_catalog_states, match_catalog_model
 from .preview_layout import PhysicalPreviewSpec, physical_preview_sizes
 from .oni_pages import (
     OniDiagnosticsPage, OniHardwareMonitorPage, OniHomePage, OniMediaLibraryPage,
@@ -162,38 +163,54 @@ class OniNavigationButton(QPushButton):
 
 
 class SupportedDisplaysDialog(QDialog):
-    """Searchable authoritative support catalog; it never discovers devices."""
-    def __init__(self,parent=None):
+    """Support catalog enriched by a read-only snapshot of existing runtimes."""
+    def __init__(self,parent=None,live_state_provider=None):
         super().__init__(parent);self.setWindowTitle("Supported Displays");self.resize(980,680);self.setObjectName("supportedDisplaysDialog")
+        self.live_state_provider=live_state_provider or (lambda:())
         outer=QVBoxLayout(self);outer.setContentsMargins(20,18,20,18);outer.setSpacing(12)
-        title=QLabel("Supported Displays");title.setObjectName("pageTitle");subtitle=QLabel("Browse hardware Oni knows about. This catalog does not represent connected devices.");subtitle.setObjectName("pageSubtitle");outer.addWidget(title);outer.addWidget(subtitle)
-        self.search=QLineEdit();self.search.setPlaceholderText("Search manufacturer, model, VID:PID or protocol…");self.search.setClearButtonEnabled(True);outer.addWidget(self.search)
+        title=QLabel("Supported Displays");title.setObjectName("pageTitle");subtitle=QLabel("Hardware support and live state are independent: connection never changes verification status.");subtitle.setObjectName("pageSubtitle");outer.addWidget(title);outer.addWidget(subtitle)
+        self.summary=QLabel();self.summary.setObjectName("diagnosticSummary");outer.addWidget(self.summary)
+        filters=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Search model, manufacturer, VID:PID or protocol…");self.search.setClearButtonEnabled(True);self.status_filter=QComboBox();self.status_filter.addItems(("All","Verified","Experimental","Unsupported / Incomplete"));self.connected_only=QCheckBox("Connected only");filters.addWidget(self.search,1);filters.addWidget(self.status_filter);filters.addWidget(self.connected_only);outer.addLayout(filters)
         body=QSplitter(Qt.Horizontal);self.brands=QListWidget();self.brands.setMinimumWidth(210);self.models=QListWidget();self.models.setSpacing(6);self.models.setWordWrap(True);self.details=QLabel();self.details.setWordWrap(True);self.details.setAlignment(Qt.AlignTop|Qt.AlignLeft);self.details.setObjectName("diagnosticSummary");self.details.setMinimumWidth(280)
         body.addWidget(self.brands);body.addWidget(self.models);body.addWidget(self.details);body.setStretchFactor(1,2);body.setStretchFactor(2,2);outer.addWidget(body,1)
         buttons=QDialogButtonBox(QDialogButtonBox.Close);buttons.rejected.connect(self.accept);outer.addWidget(buttons)
-        self.search.textChanged.connect(self._rebuild);self.brands.currentTextChanged.connect(self._rebuild_models);self.models.currentItemChanged.connect(self._show_details);self._rebuild()
+        self.search.textChanged.connect(self._rebuild);self.status_filter.currentTextChanged.connect(self._rebuild);self.connected_only.toggled.connect(self._rebuild);self.brands.currentTextChanged.connect(self._rebuild_models);self.models.currentItemChanged.connect(self._show_details)
+        self.live_timer=QTimer(self);self.live_timer.setInterval(500);self.live_timer.timeout.connect(self.refresh_live_state);self.live_timer.start();self.refresh_live_state()
 
     def _matches(self,item,query):
         return not query or query in " ".join((item.manufacturer,item.family,item.model,*item.identifiers,item.connection_type,item.key)).casefold()
 
+    def refresh_live_state(self):
+        snapshot=tuple(self.live_state_provider() or ());signature=tuple((item.stable_id,item.device_id,item.model,item.connected,item.active,item.catalog_key) for item in snapshot)
+        if signature==getattr(self,"_live_signature",None):return
+        self._live_signature=signature;self._live=snapshot;self._rows=catalog_live_states(catalog_models(),snapshot);self._rebuild()
+
     def _rebuild(self):
-        query=self.search.text().strip().casefold();current=self.brands.currentItem().text() if self.brands.currentItem() else "All manufacturers";manufacturers=sorted({item.manufacturer for item in catalog_models() if self._matches(item,query)})
+        rows=getattr(self,"_rows",catalog_live_states(catalog_models(),()));query=self.search.text().strip().casefold();status=self.status_filter.currentText();connected=self.connected_only.isChecked();filtered=filter_catalog_states(rows,query,status,connected);current=self.brands.currentItem().text() if self.brands.currentItem() else "All manufacturers";manufacturers=sorted({row.model.manufacturer for row in filtered})
+        totals={name:sum(item.status==name for item in catalog_models()) for name in ("Verified","Experimental","Unsupported / Incomplete")};live=getattr(self,"_live",());connected_count=sum(item.connected for item in live);active_count=sum(item.connected and item.active for item in live);matched_ids={item.stable_id for item in live if any(match_catalog_model(row.model,item) for row in rows)};unmatched=max(0,connected_count-len(matched_ids))
+        self.summary.setText(f"CONNECTED  {connected_count}    ·    ACTIVE  {active_count}    ·    Verified {totals['Verified']}    ·    Experimental {totals['Experimental']}    ·    Incomplete {totals['Unsupported / Incomplete']}"+(f"    ·    Unmatched {unmatched}" if unmatched else ""))
         self.brands.blockSignals(True);self.brands.clear();self.brands.addItem("All manufacturers");self.brands.addItems(manufacturers);matches=self.brands.findItems(current,Qt.MatchExactly);self.brands.setCurrentItem(matches[0] if matches else self.brands.item(0));self.brands.blockSignals(False);self._rebuild_models()
 
     def _rebuild_models(self):
-        query=self.search.text().strip().casefold();brand=self.brands.currentItem().text() if self.brands.currentItem() else "All manufacturers";self.models.clear()
-        for model in catalog_models():
-            if not self._matches(model,query) or (brand!="All manufacturers" and model.manufacturer!=brand):continue
-            row=QListWidgetItem(f"{model.model}\n{model.manufacturer}  ·  {model.status}");row.setData(Qt.UserRole,model);row.setToolTip(model.notes);self.models.addItem(row)
+        query=self.search.text().strip();brand=self.brands.currentItem().text() if self.brands.currentItem() else "All manufacturers";self.models.clear();rows=filter_catalog_states(getattr(self,"_rows",()),query,self.status_filter.currentText(),self.connected_only.isChecked())
+        rows=tuple(sorted(rows,key=lambda row:(not row.active,not row.connected,row.model.manufacturer.casefold(),row.model.model.casefold())))
+        for state in rows:
+            model=state.model
+            if brand!="All manufacturers" and model.manufacturer!=brand:continue
+            live=("  ·  ACTIVE" if state.active else "  ·  CONNECTED" if state.connected else "")
+            row=QListWidgetItem(f"{model.model}\n{model.manufacturer}  ·  {model.status}{live}");row.setData(Qt.UserRole,state);row.setToolTip(model.notes);row.setSizeHint(QSize(0,56))
+            if state.active:row.setBackground(QColor("#123651"));row.setForeground(QColor("#8fe8ff"))
+            elif state.connected:row.setBackground(QColor("#10273b"));row.setForeground(QColor("#c9f4ff"))
+            self.models.addItem(row)
         if self.models.count():self.models.setCurrentRow(0)
         else:self.details.setText("No supported display matches this search.")
 
     def _show_details(self,current,_previous=None):
         if current is None:return
-        model=current.data(Qt.UserRole);resolutions=", ".join(f"{w} × {h}" for w,h in model.resolutions) or "Model dependent";ids=", ".join(model.identifiers) or "Model-specific identity"
+        state=current.data(Qt.UserRole);model=state.model;resolutions=", ".join(f"{w} × {h}" for w,h in model.resolutions) or "Model dependent";ids=", ".join(model.identifiers) or "Model-specific identity";live="ACTIVE · CONNECTED" if state.active else "CONNECTED" if state.connected else "Not currently detected"
         explanation=("Physically validated by the ONI project." if model.status=="Verified" else "Experimental Support\n\nEnd-to-end display output is implemented, but this physical model has not yet been validated by the ONI project." if model.status=="Experimental" else "Output support is currently incomplete for this device. ONI will not send display frames until a safe implementation is available.")
         family_note=f"\nDevice family\n{model.family}" if model.family_level or model.family!=model.model else ""
-        self.details.setText(f"{model.status.upper()}\n\n{model.model}\n{model.manufacturer}{family_note}\n\nResolution / render sizes\n{resolutions}\n\nConnection / transport\n{model.connection_type}\n\nVID:PID / identifiers\n{ids}\n\n{explanation}\n\n{model.notes}")
+        self.details.setText(f"{model.status.upper()}\n{live}\n\n{model.model}\n{model.manufacturer}{family_note}\n\nResolution / render sizes\n{resolutions}\n\nConnection / transport\n{model.connection_type}\n\nVID:PID / identifiers\n{ids}\n\n{explanation}\n\n{model.notes}")
 
 def product_photo(device_id:str)->QLabel:
     asset_name="trofeo-vision-9-16-official.png" if device_id.endswith("5408") else "trofeo-vision-6-86-official.png"
@@ -1520,8 +1537,21 @@ class MainWindow(QMainWindow):
         card.profileSelected.connect(lambda name,c=card:self.apply_device_profile(name,c.device_id,c));card.profileSaveRequested.connect(lambda name,c=card:self.save_device_profile(name,c.device_id,c));card.profileSaveAsRequested.connect(lambda name,c=card:self.save_device_profile(name,c.device_id,c,save_as=True));card.profileManageRequested.connect(self.open_profiles)
         card.brightness_slider.valueChanged.connect(lambda value,c=card:self._sync_brightness(c,value));card.mediaChanged.connect(lambda _value:self._stop_shared_decode());self._refresh_monitor_template_options(card)
 
+    def _supported_display_live_states(self):
+        active_states={SessionState.PLAYING,SessionState.DISPLAYING,SessionState.RUNNING}
+        states=[]
+        for observation in self.display_lifecycle.observations:
+            card=self.card_by_physical_id.get(observation.stable_id);model="";catalog_key={"0416:5408":"trofeo-vision-916","0416:5302":"trofeo-vision-686"}.get(observation.device_id,"")
+            try:model=device_definition(observation.device_id).model
+            except KeyError:pass
+            if not catalog_key and observation.device_id.startswith(("thermalright-ref:","community-ref:")):
+                parts=observation.device_id.split(":");catalog_key=parts[1] if len(parts)>1 else ""
+            active=bool(card and card.hardware_started and card.session.state in active_states and card.session._thread and card.session._thread.is_alive())
+            states.append(LiveDisplayState(observation.stable_id,observation.device_id,model,observation.status=="connected",active,catalog_key))
+        return tuple(states)
+
     def open_supported_displays(self):
-        SupportedDisplaysDialog(self).exec()
+        SupportedDisplaysDialog(self,self._supported_display_live_states).exec()
 
     def open_display_manager(self):
         dialog=QDialog(self);dialog.setWindowTitle("Displays");dialog.resize(620,420);layout=QVBoxLayout(dialog);layout.addWidget(QLabel(f"{len(self.cards)} connected display{'s' if len(self.cards)!=1 else ''}"))

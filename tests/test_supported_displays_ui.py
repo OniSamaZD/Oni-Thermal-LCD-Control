@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication
 
 from thermalright_lcd.gui import SupportedDisplaysDialog
 from thermalright_lcd.devices.catalog import catalog_models
+from thermalright_lcd.supported_displays import LiveDisplayState, catalog_live_states, filter_catalog_states
 
 
 def app():
@@ -57,3 +58,36 @@ def test_experimental_means_runtime_output_enabled_and_incomplete_stays_closed()
     for key in ("trofeo-vision-916-v2","trofeo-vision-113","frozen-warframe-se","trofeo-vision-320"):
         item=next(row for row in rows if row.key==key)
         assert item.status=="Experimental" and item.output_enabled
+
+
+def test_live_state_never_promotes_support_classification():
+    models=catalog_models();live=(LiveDisplayState("physical-1","33c3:f101","Jonsbo DS916",True,True),)
+    state=next(row for row in catalog_live_states(models,live) if row.model.key=="jonsbo-ds916")
+    assert state.connected and state.active
+    assert state.model.status=="Experimental"
+
+
+def test_verified_connected_active_and_disconnected_states_are_independent():
+    models=catalog_models();live=(LiveDisplayState("5408","0416:5408","Trofeo Vision 9.16 LCD",True,True),)
+    rows=catalog_live_states(models,live);wide=next(row for row in rows if row.model.key=="trofeo-vision-916");compact=next(row for row in rows if row.model.key=="trofeo-vision-686")
+    assert wide.connected and wide.active and wide.model.status=="Verified"
+    assert not compact.connected and not compact.active and compact.model.status=="Verified"
+
+
+def test_search_status_connected_filter_and_exact_vid_pid_matching():
+    models=catalog_models();live=(LiveDisplayState("5302","0416:5302","Trofeo Vision 6.86 LCD",True,False),LiveDisplayState("unknown","ffff:eeee","Mystery",True,True))
+    rows=catalog_live_states(models,live)
+    found=filter_catalog_states(rows,"0416:5302","Verified",True)
+    assert len(found)==1 and found[0].model.key=="trofeo-vision-686" and found[0].connected and not found[0].active
+    assert not any(row.connected for row in rows if "ffff:eeee" in row.model.identifiers)
+
+
+def test_dialog_connected_only_refresh_disconnect_and_reconnect_without_duplicates():
+    app();snapshot=[LiveDisplayState("5408","0416:5408","Trofeo Vision 9.16 LCD",True,False)]
+    dialog=SupportedDisplaysDialog(live_state_provider=lambda:tuple(snapshot));dialog.connected_only.setChecked(True)
+    assert dialog.models.count()==1 and "CONNECTED" in dialog.models.item(0).text()
+    snapshot.clear();dialog.refresh_live_state();assert dialog.models.count()==0
+    snapshot.append(LiveDisplayState("5408","0416:5408","Trofeo Vision 9.16 LCD",True,True));dialog.refresh_live_state()
+    assert dialog.models.count()==1 and "ACTIVE" in dialog.models.item(0).text()
+    dialog.refresh_live_state();assert dialog.models.count()==1
+    dialog.close()
