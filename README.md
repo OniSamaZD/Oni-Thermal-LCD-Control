@@ -13,20 +13,20 @@ ONI is an independent project and is not an official Thermalright application. T
 
 ## Screenshots
 
-### Display Studio
+### Dual display control · Verified hardware
 
 ![ONI Display Studio with two connected displays](docs/screenshots/home.png)
 
 <details>
 <summary>More screenshots</summary>
 
-### Dual-display workspace
-
-![ONI dual-display Side-by-Side workspace](docs/screenshots/display-workspace.png)
-
-### Video playback
+### Photo · Video · GIF
 
 ![ONI video playback](docs/screenshots/playback.png)
+
+### Sensor themes · Hardware monitoring
+
+![ONI hardware-monitor output](docs/screenshots/sensor-monitor.png)
 
 </details>
 
