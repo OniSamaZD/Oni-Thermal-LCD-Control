@@ -38,6 +38,7 @@ from .media_types import MediaKind, detect_media_kind, media_filter
 from .device_discovery import DiscoveredDisplay, DisplayLifecycle, discover_supported_displays, simulated_reviewed_displays
 from .devices.registry import DEVICES, device_definition
 from .devices.catalog import catalog_models
+from .preview_layout import PhysicalPreviewSpec, physical_preview_sizes
 from .oni_pages import (
     OniDiagnosticsPage, OniHardwareMonitorPage, OniHomePage, OniMediaLibraryPage,
     OniPerformancePage, OniProfilesPage, OniSensorThemesWorkspace, OniSettingsPage, scroll_page,
@@ -444,17 +445,19 @@ class ProfileManagerDialog(QDialog):
 class DisplayCard(QFrame):
     mediaChanged = Signal(str)
     profileSelected = Signal(str); profileSaveRequested = Signal(str); profileSaveAsRequested = Signal(str); profileManageRequested = Signal()
-    def __init__(self, title, size, device_id, parent=None, hardware_sender=None, media_directory_provider=None, media_directory_selected=None):
+    def __init__(self, title, size, device_id, parent=None, hardware_sender=None, media_directory_provider=None, media_directory_selected=None, physical_diagonal_inches=None, model_name=None):
         super().__init__(parent); self.title_text = title; self.device_id = device_id; self.size_target = size; self.path = None; self._media_paths = {kind: None for kind in MediaKind}; self.media_kind = MediaKind.PHOTO; self.selected_media_kind = MediaKind.PHOTO; self.scheduler = None; self.shared_hub = None; self.playing = False; self.desired_playback_state = "Stopped"; self.hardware_started = False; self.preview_enabled = True; self.window_visible = True; self.foreground_preview_fps = 20.0; self.preview_fps = 20.0; self._next_preview = 0.0; self._last_encoded_source_index = None; self._scheduler_key = None; self.scheduler_creations = 0; self.coordinator = None; self.timeline_epoch = None; self.output_mode_request = None; self.media_directory_provider = media_directory_provider; self.media_directory_selected = media_directory_selected; self.output_ownership = OutputOwnership(); self._output_lease = self.output_ownership.lease(); self._overlay_lock = threading.Lock(); self._sensor_overlay = None; self._transform_lock = threading.Lock(); self.transform_mode = FitMode.FIT; self.transform_rotation = 0; self.pan_x = 0; self.pan_y = 0; self.zoom = 1.0; self.transform_generation = 0; self.quality_profile = "Balanced"; self.brightness = 100; self._preview_presented = deque(maxlen=180); self.preview_intervals = deque(maxlen=180); self._static_next_compose = 0.0; self.setAcceptDrops(True); self.setObjectName("card"); self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._last_delivered_frame_ref = None; self._preview_media_path = None
+        self._last_delivered_frame_ref = None; self._preview_media_path = None; self.physical_diagonal_inches = physical_diagonal_inches
         self.mapping = "interface 0 · BULK OUT 0x09 · BULK IN 0x81" if device_id.endswith("5408") else "HID MI_00 · INTERRUPT OUT 0x02 · INTERRUPT IN 0x83"
         self.qimage_count = 0; self.qpixmap_count = 0; self.preview_scale_count = 0; self.metrics_update_count = 0; self._last_primary_metrics = ""; self._last_detail_metrics = ""; self.bridge = PreviewBridge(self); self.bridge.frameReady.connect(self._consume_preview)
         self.pipeline = MediaPipeline(2); self._injected_sender = hardware_sender; self.hardware_sender = hardware_sender or build_gui_sender(device_id)
         self.session = DisplaySession(device_id, self.hardware_sender, policy=POLICIES[device_id])
         
         # --- BOYUT HESAPLAMALARI ---
-        self.is_wide = device_id.endswith("5408")
-        identity = ("Trofeo Vision 9.16 LCD", "9.16\" · 1920 × 480 (4:1)") if self.is_wide else ("Trofeo Vision LCD", "6.86\" · 1280 × 480 (8:3)")
+        self.is_wide = size[0] / max(1,size[1]) >= 3.2
+        fallback_name="Trofeo Vision 9.16 LCD" if self.is_wide else "Trofeo Vision LCD"
+        diagonal=f'{physical_diagonal_inches:g}\" · ' if physical_diagonal_inches else ""
+        identity = (model_name or fallback_name, f"{diagonal}{size[0]} × {size[1]}")
         
         # Render ve Stacked (Alt Alta) mod boyutu: Devasa
         self.render_size = (960, 240) if self.is_wide else (768, 288)
@@ -468,10 +471,10 @@ class DisplayCard(QFrame):
         self.product_photo = product_photo(device_id); self.product_photo.setFixedSize(110, 52); self.product_photo.setScaledContents(True); head.addWidget(self.product_photo)
         
         dev_info = QVBoxLayout(); dev_info.setSpacing(1); dev_info.setContentsMargins(0, 0, 0, 0)
-        vendor_lbl = QLabel("THERMALRIGHT"); vendor_lbl.setObjectName("vendorLabel")
-        name_lbl = QLabel(identity[0]); name_lbl.setObjectName("deviceNameLabel")
-        spec_lbl = QLabel(identity[1]); spec_lbl.setObjectName("deviceSpecLabel")
-        dev_info.addWidget(vendor_lbl); dev_info.addWidget(name_lbl); dev_info.addWidget(spec_lbl)
+        self.vendor_label = QLabel("THERMALRIGHT"); self.vendor_label.setObjectName("vendorLabel")
+        self.device_name_label = QLabel(identity[0]); self.device_name_label.setObjectName("deviceNameLabel"); self.device_name_label.setToolTip(title)
+        self.device_spec_label = QLabel(identity[1]); self.device_spec_label.setObjectName("deviceSpecLabel")
+        dev_info.addWidget(self.vendor_label); dev_info.addWidget(self.device_name_label); dev_info.addWidget(self.device_spec_label)
         head.addLayout(dev_info); head.addStretch()
 
         self.dot = QLabel("●"); self.dot.setObjectName("connectedDot")
@@ -484,7 +487,7 @@ class DisplayCard(QFrame):
         head.addWidget(self.media_badge); head.addSpacing(6)
         head.addWidget(self.header_fps); head.addSpacing(8)
         
-        head.addWidget(QLabel("Brightness")); self.header_brightness_slider = QSlider(Qt.Horizontal); self.header_brightness_slider.setRange(0, 100); self.header_brightness_slider.setValue(100); self.header_brightness_slider.setFixedWidth(110)
+        self.header_brightness_label=QLabel("Brightness");head.addWidget(self.header_brightness_label); self.header_brightness_slider = QSlider(Qt.Horizontal); self.header_brightness_slider.setRange(0, 100); self.header_brightness_slider.setValue(100); self.header_brightness_slider.setFixedWidth(110)
         self.header_brightness = QLabel("100%"); self.header_brightness.setObjectName("secondaryStatus"); self.header_brightness.setFixedWidth(36)
         head.addWidget(self.header_brightness_slider); head.addWidget(self.header_brightness); head.addSpacing(8)
         
@@ -502,7 +505,7 @@ class DisplayCard(QFrame):
         self.preview.setObjectName("preview")
         self.preview.zoomRequested.connect(self.adjust_zoom); self.preview.panRequested.connect(self.adjust_pan); self.preview.nudgeRequested.connect(self.adjust_pan_native)
 
-        self.media_empty_state = QWidget(); empty_layout = QVBoxLayout(self.media_empty_state); empty_layout.setContentsMargins(16, 16, 16, 16); empty_layout.addStretch()
+        self.media_empty_state = QWidget(); self.media_empty_state.setObjectName("mediaEmptyPreview"); empty_layout = QVBoxLayout(self.media_empty_state); empty_layout.setContentsMargins(10, 6, 10, 6); empty_layout.addStretch()
         self.media_empty_title = QLabel("Add Media"); self.media_empty_title.setObjectName("pageTitle"); self.media_empty_title.setAlignment(Qt.AlignCenter); empty_layout.addWidget(self.media_empty_title)
         self.media_empty_hint = QLabel("Choose a media type, browse for a file, or drag and drop it here."); self.media_empty_hint.setObjectName("muted"); self.media_empty_hint.setAlignment(Qt.AlignCenter); empty_layout.addWidget(self.media_empty_hint)
         empty_actions = QHBoxLayout(); empty_actions.addStretch(); self.media_empty_buttons = {}
@@ -709,20 +712,26 @@ class DisplayCard(QFrame):
 
     # --- YENİ EKLENEN LAYOUT MODU DEĞİŞTİRİCİ ---
     def _fit_side_by_side_preview(self):
-        """Contain the LCD preview inside the card's allocated splitter slot."""
+        """Fit all visible LCDs using one physical scale inside their slots."""
         if not getattr(self, "_side_by_side_active", False):
             return
+        window=self.window()
+        if hasattr(window,"_fit_display_previews"):window._fit_display_previews()
+        else:self._apply_physical_preview_size((max(1,self.preview_column.width()-8),max(1,self.preview_column.height()-self.preview_footer.sizeHint().height()-18)))
 
-        available=self.preview_column.contentsRect();available_w=max(1,available.width()-8);available_h=max(1,available.height()-self.preview_footer.sizeHint().height()-18)
-        window=self.window();splitter=getattr(window,"display_splitter",None);count=max(1,len(getattr(window,"cards",())))
-        if splitter is not None and count>1:
-            slot_width=max(1,(splitter.width()-splitter.handleWidth()*(count-1))//count)
-            available_w=min(available_w,max(1,slot_width-34))
-        source_w,source_h=self.size_target;scale=min(available_w/source_w,available_h/source_h)
-        width=max(1,int(round(source_w*scale)));height=max(1,int(round(source_h*scale)))
+    def _physical_preview_spec(self):
+        return PhysicalPreviewSpec(self.size_target,self.physical_diagonal_inches)
 
-        self.preview.setFixedSize(width, height)
-        self.preview_stack.setFixedSize(width, height)
+    def _preview_available_extent(self):
+        available=self.preview_column.contentsRect()
+        return max(1,available.width()-8),max(1,available.height()-self.preview_footer.sizeHint().height()-18)
+
+    def _apply_physical_preview_size(self,size):
+        width,height=size;self.preview.setFixedSize(width,height);self.preview_stack.setFixedSize(width,height)
+        detailed=height>=135 and width>=420
+        self.media_empty_hint.setVisible(detailed)
+        self.media_empty_browse.setVisible(detailed)
+        for button in self.media_empty_buttons.values():button.setVisible(detailed)
 
     def sizeHint(self):
         # Keep the card's layout hint stable after its first real layout query.
@@ -761,8 +770,8 @@ class DisplayCard(QFrame):
             QTimer.singleShot(0, self._fit_side_by_side_preview)
             QTimer.singleShot(60, self._fit_side_by_side_preview)
         else:
-            self.preview.setFixedSize(*self.stacked_size)
-            self.preview_stack.setFixedSize(*self.stacked_size)
+            self.preview.setFixedSize(1,1)
+            self.preview_stack.setFixedSize(1,1)
 
         # Keep the compact footer actions available in stacked mode. Transform
         # values live in the inspector in both layouts.
@@ -847,7 +856,7 @@ class DisplayCard(QFrame):
     def _update_media_controls(self):
         kind=self.media_kind if self.path else self.selected_media_kind;photo=kind is MediaKind.PHOTO
         self.media_badge.setText("PHOTO · STATIC" if photo else f"{kind.value.upper()} · {'PLAYING' if self.playing else 'READY'}")
-        self.header_fps.setVisible(not photo)
+        self.header_fps.setVisible(not photo and self.width()>=700)
         self.fps_label.setVisible(not photo);self.fps.setVisible(not photo);self.quality_label.hide();self.quality_box.hide();self.pause_button.hide();self.play_button.hide();self.stop_button.hide();self.clear_button.hide()
         self.footer_play.show();self.footer_pause.show();self.footer_stop.show()
         action="Change Media" if self.path else "Add Media";self.play_button.setText("Show" if photo else "Play");self.choose_button.setText(action);self.footer_change.setText(action);self.preview_stack.setCurrentWidget(self.preview if self.path else self.media_empty_state)
@@ -892,8 +901,9 @@ class DisplayCard(QFrame):
 
     def adjust_zoom(self,factor):self.zoom_box.setValue(max(1,min(8,self.zoom_box.value()*factor)))
     def set_preview_scale(self,value):
-        # Retained only for loading older profiles. Home always auto-fits.
-        self.preview_scale=max(50,min(200,int(value)));self._update_preview_geometry()
+        # Retained only for loading older profiles. Preview geometry is now
+        # automatic and physical-size-aware; media zoom remains independent.
+        self.preview_scale=max(50,min(200,int(value)))
 
     def adjust_pan(self,dx,dy):
         sx=self.size_target[0]/max(1,self.preview.width());sy=self.size_target[1]/max(1,self.preview.height());self.pan_x_box.setValue(self.pan_x_box.value()+round(dx*sx));self.pan_y_box.setValue(self.pan_y_box.value()+round(dy*sy))
@@ -1193,9 +1203,14 @@ class DisplayCard(QFrame):
             count=max(1,len(getattr(window,"cards",())))
             spacing=getattr(window,"display_splitter",None).handleWidth()*(count-1) if hasattr(window,"display_splitter") else 0
             allocated_width=max(1,(scroll.viewport().width()-spacing)//count)
-        vertical=allocated_width<=920;direction=QBoxLayout.TopToBottom if vertical else QBoxLayout.LeftToRight
+        vertical=allocated_width<=760;direction=QBoxLayout.TopToBottom if vertical else QBoxLayout.LeftToRight
         if self.workspace_layout.direction()!=direction:self.workspace_layout.setDirection(direction)
-        self.unified_inspector.setMaximumWidth(16777215 if vertical else 336)
+        self.unified_inspector.setMaximumWidth(560 if vertical else 336)
+        self.workspace_layout.setAlignment(self.unified_inspector,Qt.AlignHCenter if vertical else Qt.Alignment())
+        compact_header=self.width()<700
+        self.product_photo.setVisible(not compact_header);self.vendor_label.setVisible(not compact_header);self.device_spec_label.setVisible(not compact_header)
+        self.media_badge.setVisible(not compact_header);self.header_brightness_label.setVisible(not compact_header);self.header_brightness.setVisible(not compact_header);self.header_overflow.setVisible(not compact_header)
+        self.header_brightness_slider.setFixedWidth(78 if compact_header else 110)
         for button in self.footer_mode_buttons.values():button.setVisible(not vertical)
         self.footer_reset.setVisible(not vertical)
         QTimer.singleShot(0,self._update_preview_geometry)
@@ -1204,14 +1219,10 @@ class DisplayCard(QFrame):
         super().showEvent(event);self.workspace.layout().activate();QTimer.singleShot(0,self._update_preview_geometry);QTimer.singleShot(50,self._update_preview_geometry)
 
     def _update_preview_geometry(self):
-        if getattr(self,"_side_by_side_active",False):
-            self._fit_side_by_side_preview();return
-        ratio=self.size_target[0]/self.size_target[1]
-        available=self.preview_column.contentsRect();available_w=max(280,available.width()-8);available_h=max(105,available.height()-self.preview_footer.sizeHint().height()-18)
-        scale=getattr(self,"preview_scale",100)/100;width=min(available_w,int(available_h*ratio));width=max(280,int(width*scale));height=max(105,int(round(width/ratio)))
-        if height>available_h:height=available_h;width=int(round(height*ratio))
-        self.preview.setFixedSize(width,height);self.preview_stack.setFixedSize(width,height)
-        if hasattr(self,"preview_scale_value"):self.preview_scale_value.setText(f"{getattr(self,'preview_scale',100)}%")
+        window=self.window()
+        if hasattr(window,"_fit_display_previews"):window._fit_display_previews()
+        else:self._apply_physical_preview_size(physical_preview_sizes((self._physical_preview_spec(),),(self._preview_available_extent(),))[0])
+        if hasattr(self,"preview_scale_value"):self.preview_scale_value.setText("Auto")
 
 
 class MainWindow(QMainWindow):
@@ -1429,7 +1440,7 @@ class MainWindow(QMainWindow):
 
     def _add_discovered_display(self, observation: DiscoveredDisplay):
         definition=device_definition(observation.device_id)
-        card=DisplayCard(f"{definition.manufacturer.upper()} · {definition.model}",definition.encoded_size,observation.device_id,media_directory_provider=self._chooser_provider,media_directory_selected=self._chooser_selected)
+        card=DisplayCard(f"{definition.manufacturer.upper()} · {definition.model}",definition.encoded_size,observation.device_id,media_directory_provider=self._chooser_provider,media_directory_selected=self._chooser_selected,physical_diagonal_inches=definition.physical_diagonal_inches,model_name=definition.model)
         card.physical_id=observation.stable_id;self.cards.append(card);self.card_by_physical_id[observation.stable_id]=card;self.card_by_id.setdefault(observation.device_id,card);self.display_splitter.addWidget(card)
         return card
 
@@ -2270,10 +2281,11 @@ class MainWindow(QMainWindow):
         orientation=Qt.Horizontal if self.settings.display_layout=="side_by_side" else Qt.Vertical
         self.display_splitter.setOrientation(orientation)
         stacked=orientation==Qt.Vertical
+        stacked_card_min=470
         for card in self.cards:
             card.set_layout_mode(not stacked)
-            card.setMinimumHeight(350 if stacked else 0);card.setMaximumHeight(16777215);card.setSizePolicy(QSizePolicy.Expanding if stacked else QSizePolicy.Ignored,QSizePolicy.Expanding)
-        self.display_splitter.setMinimumHeight(max(710,350*len(self.cards)) if stacked and len(self.cards)>1 else 350 if stacked and self.cards else 0);self.display_splitter.setMaximumHeight(16777215)
+            card.setMinimumHeight(stacked_card_min if stacked else 0);card.setMaximumHeight(16777215);card.setSizePolicy(QSizePolicy.Expanding if stacked else QSizePolicy.Ignored,QSizePolicy.Expanding)
+        self.display_splitter.setMinimumHeight(stacked_card_min*len(self.cards) if stacked and self.cards else 0);self.display_splitter.setMaximumHeight(16777215)
         ordered=[self.card_by_id[device_id] for device_id in self.settings.display_order if device_id in self.card_by_id]
         ordered.extend(card for card in self.cards if card not in ordered)
         for index,card in enumerate(ordered):self.display_splitter.addWidget(card);self.display_splitter.setStretchFactor(index,1)
@@ -2287,7 +2299,17 @@ class MainWindow(QMainWindow):
         if self.display_splitter.orientation()!=Qt.Horizontal or not self.cards:return
         available=max(1,self.display_splitter.width()-self.display_splitter.handleWidth()*(len(self.cards)-1))
         self.display_splitter.setSizes([max(1,available//len(self.cards))]*len(self.cards))
-        for card in self.cards:card._fit_side_by_side_preview()
+        self._fit_display_previews()
+
+    def _fit_display_previews(self):
+        if getattr(self,"_fitting_physical_previews",False):return
+        cards=tuple(card for card in self.cards if card.isVisible())
+        if not cards:return
+        self._fitting_physical_previews=True
+        try:
+            sizes=physical_preview_sizes(tuple(card._physical_preview_spec() for card in cards),tuple(card._preview_available_extent() for card in cards))
+            for card,size in zip(cards,sizes):card._apply_physical_preview_size(size)
+        finally:self._fitting_physical_previews=False
 
 
 STYLE = """
@@ -2462,6 +2484,11 @@ QLabel#preview {
     border: none;
     border-radius: 8px;
     color: #7892a8;
+}
+QWidget#mediaEmptyPreview {
+    background: #05070b;
+    border: 2px solid #2c3543;
+    border-radius: 9px;
 }
 
 QFrame#previewFooter {

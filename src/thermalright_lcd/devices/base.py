@@ -26,6 +26,7 @@ class DeviceDefinition:
     support_status: str = "Physically verified"
     brightness_support: str = "software"
     maximum_fps: int = 30
+    physical_diagonal_inches: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

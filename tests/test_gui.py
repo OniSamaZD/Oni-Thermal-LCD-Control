@@ -128,6 +128,26 @@ class GuiTests(unittest.TestCase):
                     self.assertAlmostEqual(card.preview.width()/card.preview.height(),card.size_target[0]/card.size_target[1],delta=.04)
             window.set_display_layout("stacked");QTest.qWait(80);first,second=window.cards;self.assertEqual(window.display_splitter.orientation(),Qt.Vertical);self.assertLess(first.geometry().bottom(),second.geometry().top());window.shutdown()
 
+    def test_display_workspace_previews_use_physical_scale_without_moving_controls(self):
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):
+            window=MainWindow();window.show();window.open_display_workspace();window.set_display_layout("side_by_side")
+            sessions=tuple(card.session for card in window.cards)
+            self.assertEqual(window.left.device_name_label.text(),"Trofeo Vision 9.16 LCD")
+            self.assertEqual(window.right.device_name_label.text(),"Trofeo Vision LCD 6.86")
+            for width,height in ((1920,1080),(1600,900),(1366,768),(1280,800)):
+                window.resize(width,height);QTest.qWait(90);self.app.processEvents();wide,compact=window.left,window.right
+                wide_diagonal=(wide.preview.width()**2+wide.preview.height()**2)**.5;compact_diagonal=(compact.preview.width()**2+compact.preview.height()**2)**.5
+                self.assertGreater(wide.preview.width(),compact.preview.width())
+                self.assertAlmostEqual(wide_diagonal/compact_diagonal,9.16/6.86,delta=.03)
+                self.assertLessEqual(abs(wide.preview.width()-wide.preview.height()*(1920/462)),2.0)
+                self.assertLessEqual(abs(compact.preview.width()-compact.preview.height()*(1280/480)),2.0)
+                self.assertLessEqual(abs(wide.unified_inspector.width()-compact.unified_inspector.width()),2)
+                self.assertLessEqual(max(card.unified_inspector.width() for card in window.cards),560)
+            for _ in range(3):
+                window.set_display_layout("stacked");QTest.qWait(70);window.set_display_layout("side_by_side");QTest.qWait(70)
+            self.assertEqual(tuple(card.session for card in window.cards),sessions)
+            self.assertEqual(len({id(card) for card in window.cards}),2);window.shutdown()
+
     def test_collapsed_home_connected_display_manage_controls_remain_readable(self):
         from PySide6.QtWidgets import QPushButton
         with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):

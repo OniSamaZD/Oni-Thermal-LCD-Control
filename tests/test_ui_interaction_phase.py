@@ -132,8 +132,9 @@ class UiInteractionPhaseTests(unittest.TestCase):
 
     def test_preview_sizes_do_not_change_content_zoom_or_control_widths(self):
         card=self.card();card.auto_preview.setChecked(False);zoom=card.zoom_box.value();button_width=card.play_button.width()
+        preview_size=card.preview.size()
         for scale in (100,125,150,175,200):
-            card.preview_scale_slider.setValue(scale);self.assertAlmostEqual(card.preview.width()/card.preview.height(),1280/480,delta=.03);self.assertEqual(card.zoom_box.value(),zoom);self.assertEqual(card.play_button.width(),button_width)
+            card.preview_scale_slider.setValue(scale);self.assertEqual(card.preview.size(),preview_size);self.assertAlmostEqual(card.preview.width()/card.preview.height(),1280/480,delta=.03);self.assertEqual(card.zoom_box.value(),zoom);self.assertEqual(card.play_button.width(),button_width)
         card.shutdown()
 
     def test_redesigned_context_tabs_and_responsive_reflow(self):

@@ -29,6 +29,19 @@ class PlaybackTests(unittest.TestCase):
         delivered=[];source=EndlessSource();scheduler=FrameScheduler(source,delivered.append,target_fps=20)
         scheduler.start();time.sleep(.18);scheduler.stop()
         self.assertLessEqual(len(delivered),5);self.assertTrue(source.closed);self.assertEqual(scheduler.metrics.delivered,len(delivered))
+    def test_output_fps_cap_drops_frames_without_slowing_source_timeline(self):
+        class Finite60Fps:
+            def __init__(self):self.index=0;self.closed=False
+            def next_frame(self):
+                if self.index>=30:return None
+                frame=MediaFrame(None,1/60,self.index,self.index/60,None);self.index+=1;return frame
+            def close(self):self.closed=True
+        source=Finite60Fps();delivered=[];scheduler=FrameScheduler(source,delivered.append,target_fps=15)
+        started=time.perf_counter();scheduler.start()
+        while scheduler.is_active and time.perf_counter()-started<2:time.sleep(.01)
+        elapsed=time.perf_counter()-started;scheduler.stop()
+        self.assertLess(elapsed,.8);self.assertGreaterEqual(len(delivered),7);self.assertLessEqual(len(delivered),9)
+        self.assertGreaterEqual(scheduler.metrics.dropped,20);self.assertTrue(source.closed)
     def test_two_animation_schedulers_are_independent(self):
         left=[];right=[];a=FrameScheduler(EndlessSource("red"),left.append,30);b=FrameScheduler(EndlessSource("blue"),right.append,15)
         a.start();b.start();time.sleep(.12);a.stop();b.stop();self.assertTrue(left and right);self.assertGreaterEqual(len(left),len(right))

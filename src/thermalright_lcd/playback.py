@@ -143,8 +143,13 @@ class PyAvVideoSource:
             except StopIteration:break
         return skipped
     def close(self):
+        frames,self._frames=getattr(self,"_frames",None),iter(())
+        try:
+            if frames is not None:frames.close()
+        except Exception:pass
         container,self.container=self.container,None
         if container is not None:container.close()
+        self.stream=None;self.hwaccel=None
 
 
 class FfmpegScaledVideoSource:
@@ -272,7 +277,7 @@ class FrameScheduler:
             skipped+=1
         return skipped
     def _run(self):
-        due=max(self.clock(),self.start_epoch or 0);timeline_started=due;paused_total=0.0;pause_mark=None;last_pts=-1.0;interval_hint=1/self.target_fps if self.target_fps else 1/30;decode_started=self.clock();delivery_started_at=self.clock()
+        due=max(self.clock(),self.start_epoch or 0);timeline_started=due;paused_total=0.0;pause_mark=None;last_pts=-1.0;interval_hint=1/self.target_fps if self.target_fps else 1/30;next_delivery_pts=0.0;decode_started=self.clock();delivery_started_at=self.clock()
         try:
             while not self._stop.is_set():
                 if self._paused.is_set():
@@ -286,7 +291,7 @@ class FrameScheduler:
                     count=min(120,int((now-due)//interval_hint));skipped=self._skip(count);self.metrics.decoded+=skipped;self.metrics.dropped+=max(skipped,count if getattr(self.source,"sequential_stream",False) else skipped);due=(now if getattr(self.source,"sequential_stream",False) else due+skipped*interval_hint)
                 frame=self._next_frame()
                 if frame is None:break
-                if frame.pts_seconds<last_pts:timeline_started=self.clock();paused_total=0.0
+                if frame.pts_seconds<last_pts:timeline_started=self.clock();paused_total=0.0;next_delivery_pts=0.0
                 timeline_now=max(0.0,self.clock()-timeline_started-paused_total)
                 if getattr(self.source,"sequential_stream",False) and frame.pts_seconds+frame.duration_seconds<timeline_now:
                     # A sequential decoder cannot seek past stale frames for
@@ -305,8 +310,23 @@ class FrameScheduler:
                 last_pts=frame.pts_seconds
                 self.metrics.decoded+=1
                 self.metrics.decode_fps=self.metrics.decoded/max(.001,self.clock()-decode_started)
-                interval=max(frame.duration_seconds,1/self.target_fps) if self.target_fps else frame.duration_seconds
+                # target_fps is an output sampling/capacity hint, never a
+                # playback-speed control.  Advancing the source clock by
+                # max(source_duration, 1/target_fps) made a 60 FPS source run
+                # at half speed on a 30 FPS output.  Transport backpressure
+                # is handled by the bounded latest-frame slots; source time
+                # must always advance by the source frame duration.
+                interval=frame.duration_seconds
                 interval_hint=interval
+                if self.target_fps:
+                    output_interval=1/self.target_fps
+                    if frame.pts_seconds+1e-9<next_delivery_pts:
+                        self.metrics.dropped+=1;due+=interval
+                        try:
+                            if frame.image is not None:frame.image.close()
+                        except Exception:pass
+                        continue
+                    while next_delivery_pts<=frame.pts_seconds+1e-9:next_delivery_pts+=output_interval
                 if self.inline_delivery:
                     delivery_started=time.perf_counter();self.deliver(frame);elapsed_ms=(time.perf_counter()-delivery_started)*1000;self.metrics.delivered+=1;self.metrics.mean_delivery_ms+=(elapsed_ms-self.metrics.mean_delivery_ms)/self.metrics.delivered;self.metrics.actual_fps=self.metrics.delivered/max(.001,self.clock()-delivery_started_at)
                     if self.delivery_durations_ms is not None:self.delivery_durations_ms.append(elapsed_ms)
@@ -397,6 +417,8 @@ class SharedFrameScheduler:
         with self._condition:self._condition.notify_all()
         ok=self.scheduler.stop(timeout);workers=list(self._workers)
         for worker in workers:worker.join(timeout)
-        alive=any(worker.is_alive() for worker in workers);self._workers=[];self._latest={name:None for name in self.consumers};return ok and not alive
+        alive=any(worker.is_alive() for worker in workers);self._workers=[];self._latest={name:None for name in self.consumers}
+        if ok and not alive:self.consumers.clear();self._enabled.clear()
+        return ok and not alive
     @property
     def active_workers(self):return sum(worker.is_alive() for worker in self._workers)+self.scheduler.active_workers

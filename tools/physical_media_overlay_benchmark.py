@@ -73,6 +73,13 @@ def main():
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
+    discovery_deadline = time.perf_counter() + 15.0
+    while len(window.cards) < 2 and time.perf_counter() < discovery_deadline:
+        app.processEvents()
+        time.sleep(.01)
+    if len(window.cards) < 2:
+        window.shutdown()
+        raise RuntimeError(f"expected two discovered displays, found {len(window.cards)}")
     cards = tuple(card for card in (window.left, window.right) if args.device == "both" or card.device_id == args.device)
     if args.preview_fps is not None:
         for card in cards:card.foreground_preview_fps=float(args.preview_fps);card.preview_fps=float(args.preview_fps)
