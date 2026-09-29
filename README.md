@@ -106,7 +106,7 @@ Reviewed `0416:5408` and `0416:5302` devices use the built-in public onboarding 
 
 ## Development status
 
-Version 0.1.1 is the current public release. Development validation completed with:
+Version 0.1.1 is the prepared release. Development validation completed with:
 
 - 500/500 discovery stress transactions
 - 100/100 real-GUI rescans
