@@ -15,9 +15,8 @@ from dataclasses import dataclass
 import binascii
 import json
 import re
-import subprocess
 import struct
-from ..subprocess_utils import hidden_subprocess_kwargs
+from ..live_state import DeviceDisconnected, SafetyError
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,34 +145,29 @@ def _instance_id_from_interface_path(path: str) -> str | None:
     return f"USB\\{match.group(1)}\\{match.group(2)}".upper() if match else None
 
 
-def enumerate_connected_candidates(runner=subprocess.run, path_enumerator=None) -> tuple[ConnectedPanelCandidate, ...]:
+def enumerate_connected_candidates(path_enumerator=None, snapshot=None) -> tuple[ConnectedPanelCandidate, ...]:
     """Enumerate only registered interfaces for supported WinUSB identities.
 
     The old implementation queried properties for every USB PnP node and asked
     for a device-interface property on device objects.  On some Windows hosts
     that query never completes.  Interface enumeration is native and bounded;
-    PowerShell is used only for the exact physical interfaces already found.
+    PnP metadata comes from the transaction-scoped native snapshot.
     """
     from ..windows_usb import enumerate_registered_winusb_paths
     supported=("87ad:70db","0416:5409","0416:5406")
     paths=(path_enumerator or enumerate_registered_winusb_paths)(supported)
+    if snapshot is None:
+        from ..windows_metadata import collect_windows_metadata_snapshot
+        snapshot=collect_windows_metadata_snapshot()
     found=[]
     for vid_pid,path in paths:
         instance=_instance_id_from_interface_path(path)
         if not instance:continue
-        escaped=instance.replace("'","''")
-        script=(f"$d=Get-PnpDevice -InstanceId '{escaped}' -ErrorAction Stop;"
-                f"$p=Get-PnpDeviceProperty -InstanceId '{escaped}' -ErrorAction Stop;"
-                "$o=[ordered]@{status=$d.Status;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data};$o|ConvertTo-Json -Compress")
-        try:cp=runner(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=3,**hidden_subprocess_kwargs())
-        except subprocess.TimeoutExpired:continue
-        if cp.returncode:continue
-        try:data=json.loads(cp.stdout or "{}")
-        except json.JSONDecodeError:continue
-        container=str(data.get("container_id") or "")
-        if str(data.get("status") or "").upper()!="OK" or not container:continue
+        try:data=snapshot.exact(instance)
+        except (DeviceDisconnected,SafetyError):continue
+        if data.status.upper()!="OK" or not data.container_id:continue
         guid_match=re.search(r"(#\{[0-9a-f-]+\})$",path,re.I);guid=guid_match.group(1)[1:] if guid_match else ""
-        found.append(ConnectedPanelCandidate(instance,vid_pid,"WINUSB","connected",container,guid,path))
+        found.append(ConnectedPanelCandidate(instance,vid_pid,data.service,"connected",data.container_id,guid,path))
     return tuple(found)
 
 
@@ -311,7 +305,9 @@ class ReferencePanelConnection:
         try:
             probe=build_probe(self.vid_pid,self.transport_name)
             if self.transport.write(self.out_endpoint,probe,self.timeout_ms)!=len(probe):raise RuntimeError("short initialization write")
-            response_size=37 if self.transport_name=="hid" else 511 if self.vid_pid=="0416:5409" else 1024 if self.vid_pid in {"87ad:70db","0416:5406"} else 512
+            # HID report ID zero is stripped by RealHidTransport; the reviewed
+            # 5302 input report is 37 bytes on Windows and 36 protocol bytes.
+            response_size=36 if self.transport_name=="hid" else 511 if self.vid_pid=="0416:5409" else 1024 if self.vid_pid in {"87ad:70db","0416:5406"} else 512
             response=self.transport.read(self.in_endpoint,response_size,self.timeout_ms)
             self.model=detect_model(self.vid_pid,self.transport_name,response)
             if self.model is None:raise RuntimeError("initialization response did not identify one supported model")

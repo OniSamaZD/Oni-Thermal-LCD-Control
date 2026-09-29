@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
     QPushButton, QComboBox, QFileDialog, QFrame, QMessageBox, QDialog, QCheckBox, QFormLayout,
     QDialogButtonBox, QListWidget, QListWidgetItem, QAbstractItemView, QTabWidget, QScrollArea,
     QSystemTrayIcon, QMenu, QInputDialog, QStackedWidget, QSizePolicy, QLineEdit, QSpinBox, QDoubleSpinBox,
-    QSlider, QToolButton, QBoxLayout, QSplitter, QButtonGroup, QGroupBox, QGridLayout)
+    QSlider, QToolButton, QBoxLayout, QSplitter, QButtonGroup, QGroupBox, QGridLayout, QLayout)
 from .media import cache_overlay, render_static, render_image, FitMode, MediaPipeline, QUALITY_PROFILES
 from .playback import open_frame_source, FrameScheduler, SharedFrameScheduler
 from .settings import SettingsStore, AppSettings, DisplayProfile
@@ -242,8 +242,8 @@ class PreviewBridge(QObject):
         with self._lock: return int(self._latest is not None)
 
 class DisplayScanBridge(QObject):
-    resultsReady = Signal(object)
-    failed = Signal(str)
+    resultsReady = Signal(int,object)
+    failed = Signal(int,str)
 
 class PreviewLabel(QLabel):
     zoomRequested = Signal(float); panRequested = Signal(int, int); nudgeRequested = Signal(int, int)
@@ -709,19 +709,17 @@ class DisplayCard(QFrame):
 
     # --- YENİ EKLENEN LAYOUT MODU DEĞİŞTİRİCİ ---
     def _fit_side_by_side_preview(self):
-        """Use almost all free space in the left preview column in Side-by-Side."""
+        """Contain the LCD preview inside the card's allocated splitter slot."""
         if not getattr(self, "_side_by_side_active", False):
             return
 
-        # After Qt has laid the two cards out, this is the real width remaining
-        # beside the compact inspector.  Fill it instead of using a small
-        # hard-coded preview size.
-        available=self.preview_column.contentsRect();available_w=max(280,available.width()-8);available_h=max(105,available.height()-self.preview_footer.sizeHint().height()-18)
-        ratio=self.size_target[0]/self.size_target[1]
-
-        # Keep a small breathing margin but otherwise make the LCD preview as
-        # large as the half-screen card allows.
-        width=min(available_w,int(available_h*ratio));height=int(round(width/ratio))
+        available=self.preview_column.contentsRect();available_w=max(1,available.width()-8);available_h=max(1,available.height()-self.preview_footer.sizeHint().height()-18)
+        window=self.window();splitter=getattr(window,"display_splitter",None);count=max(1,len(getattr(window,"cards",())))
+        if splitter is not None and count>1:
+            slot_width=max(1,(splitter.width()-splitter.handleWidth()*(count-1))//count)
+            available_w=min(available_w,max(1,slot_width-34))
+        source_w,source_h=self.size_target;scale=min(available_w/source_w,available_h/source_h)
+        width=max(1,int(round(source_w*scale)));height=max(1,int(round(source_h*scale)))
 
         self.preview.setFixedSize(width, height)
         self.preview_stack.setFixedSize(width, height)
@@ -736,14 +734,28 @@ class DisplayCard(QFrame):
         cached = getattr(self, "_stable_card_size_hint", None)
         if cached is None:
             self._stable_card_size_hint = QSize(hint)
-            return hint
+            cached = self._stable_card_size_hint
+        if getattr(self, "_side_by_side_active", False):
+            return QSize(0, cached.height())
         return QSize(cached)
+
+    def minimumSizeHint(self):
+        if getattr(self, "_side_by_side_active", False):
+            return QSize(0, 0)
+        return QFrame.minimumSizeHint(self)
 
     def set_layout_mode(self, side_by_side: bool):
         # Stacked mode is intentionally left exactly as before.
         self._side_by_side_active = bool(side_by_side)
 
         if side_by_side:
+            # Release the stacked preview's fixed width before the horizontal
+            # splitter allocates equal slots. The contained preview is fitted
+            # again after that allocation has completed.
+            self.workspace_layout.setDirection(QBoxLayout.TopToBottom)
+            self.unified_inspector.setMaximumWidth(16777215)
+            self.preview.setFixedSize(1, 1)
+            self.preview_stack.setFixedSize(1, 1)
             # Give Qt one event-loop turn to finish splitting the window, then
             # size the preview from the *actual* remaining width.
             QTimer.singleShot(0, self._fit_side_by_side_preview)
@@ -761,6 +773,7 @@ class DisplayCard(QFrame):
         self.preview_column.setMinimumWidth(0)
         self.workspace.setMinimumWidth(0)
         self.setMinimumWidth(0)
+        self.unified_inspector.setMinimumHeight(395 if side_by_side else 0)
 
         if self.path and not self.playing:
             self._apply_transform_refresh()
@@ -1174,7 +1187,13 @@ class DisplayCard(QFrame):
         # Side-by-side cards are individually narrow enough that retaining a
         # desktop-width rail would crush both the preview and controls.  At
         # this breakpoint each card becomes a compact vertical workspace.
-        vertical=self.width()<=920;direction=QBoxLayout.TopToBottom if vertical else QBoxLayout.LeftToRight
+        allocated_width=self.width()
+        window=self.window();scroll=getattr(window,"display_workspace_page",None)
+        if getattr(self,"_side_by_side_active",False) and scroll is not None:
+            count=max(1,len(getattr(window,"cards",())))
+            spacing=getattr(window,"display_splitter",None).handleWidth()*(count-1) if hasattr(window,"display_splitter") else 0
+            allocated_width=max(1,(scroll.viewport().width()-spacing)//count)
+        vertical=allocated_width<=920;direction=QBoxLayout.TopToBottom if vertical else QBoxLayout.LeftToRight
         if self.workspace_layout.direction()!=direction:self.workspace_layout.setDirection(direction)
         self.unified_inspector.setMaximumWidth(16777215 if vertical else 336)
         for button in self.footer_mode_buttons.values():button.setVisible(not vertical)
@@ -1196,7 +1215,7 @@ class DisplayCard(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, discovery_provider=None):
+    def __init__(self, discovery_provider=None, startup_discovery=None):
         super().__init__(); self.setWindowTitle("Oni Thermal LCD Control"); self.resize(1440, 860); self.setMinimumSize(820, 560)
         base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OniThermalLcd"; self.base = base; self.store = SettingsStore(base / "settings.json"); self.settings = self.store.load(); self.startup = StartupManager()
         
@@ -1240,7 +1259,7 @@ class MainWindow(QMainWindow):
         side.addWidget(self.ultra_low_lbl); side.addWidget(self.version_lbl)
         shell.addWidget(self.sidebar)
 
-        home = QWidget(); v = QVBoxLayout(home); v.setContentsMargins(16, 14, 16, 14); v.setSpacing(12)
+        home = QWidget(); home.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Expanding); v = QVBoxLayout(home); v.setSizeConstraint(QLayout.SetNoConstraint); v.setContentsMargins(16, 14, 16, 14); v.setSpacing(12)
         
         top = QHBoxLayout()
         title_v = QVBoxLayout(); title_v.setSpacing(2)
@@ -1282,12 +1301,18 @@ class MainWindow(QMainWindow):
         self.display_splitter.setChildrenCollapsible(False)
         v.addWidget(self.display_splitter, 1)
         self.display_empty_state=QFrame();self.display_empty_state.setObjectName("card");empty=QVBoxLayout(self.display_empty_state);empty.addStretch();empty_title=QLabel("No LCD connected");empty_title.setObjectName("pageTitle");empty_title.setAlignment(Qt.AlignCenter);empty.addWidget(empty_title);empty_hint=QLabel("Connect a supported USB LCD or scan for displays.");empty_hint.setObjectName("muted");empty_hint.setAlignment(Qt.AlignCenter);empty.addWidget(empty_hint);empty_actions=QHBoxLayout();empty_actions.addStretch();scan=QPushButton("Scan for Displays");scan.setObjectName("primaryButton");scan.clicked.connect(self.scan_for_displays);add_display=QPushButton("Add / Connect Display");add_display.clicked.connect(self.open_display_manager);supported=QPushButton("Supported Displays");supported.clicked.connect(self.open_supported_displays);empty_actions.addWidget(scan);empty_actions.addWidget(add_display);empty_actions.addWidget(supported);empty_actions.addStretch();empty.addLayout(empty_actions);empty.addStretch();v.addWidget(self.display_empty_state,1)
-        if discovery_provider is None and os.environ.get("QT_QPA_PLATFORM","").casefold()=="offscreen":discovery_provider=simulated_reviewed_displays
+        production_discovery=discovery_provider is None
+        synchronous_injected=discovery_provider is not None and startup_discovery is None
+        simulated_discovery=production_discovery and os.environ.get("QT_QPA_PLATFORM","").casefold()=="offscreen"
+        start_discovery=production_discovery if startup_discovery is None else bool(startup_discovery)
+        if simulated_discovery:discovery_provider=simulated_reviewed_displays
+        if simulated_discovery and startup_discovery is None:start_discovery=False
         self._discovery_provider=discovery_provider or discover_supported_displays
         self.display_lifecycle=DisplayLifecycle(self._add_discovered_display,self._remove_display_card)
-        try:self.display_lifecycle.reconcile(self._discovery_provider())
-        except Exception:self.display_lifecycle.reconcile(())
+        self._display_scan_generation=0;self._display_scan_threads={};self._display_scan_thread=None;self._display_scan_shutting_down=False
+        if simulated_discovery or synchronous_injected:self.display_lifecycle.reconcile(self._discovery_provider())
         self._refresh_display_surface()
+        if start_discovery:self.display_count_label.setText("Displays: scanning…")
         self.global_brightness.valueChanged.connect(self._set_global_brightness)
 
         bottom_bar = QHBoxLayout(); bottom_bar.setSpacing(10)
@@ -1302,7 +1327,7 @@ class MainWindow(QMainWindow):
         bottom_bar.addWidget(apply_both); bottom_bar.addWidget(save_profile)
         v.addLayout(bottom_bar)
 
-        home_scroll = QScrollArea(); home_scroll.setWidgetResizable(True); home_scroll.setFrameShape(QFrame.NoFrame); home_scroll.setWidget(home)
+        home_scroll = QScrollArea(); home_scroll.setWidgetResizable(True); home_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); home_scroll.setFrameShape(QFrame.NoFrame); home_scroll.setWidget(home)
         self.display_workspace_page = home_scroll
         self.home_page = OniHomePage(self); self.home_page.displayWorkspaceRequested.connect(self.open_display_workspace)
         self.media_page = OniMediaLibraryPage(self)
@@ -1377,6 +1402,7 @@ class MainWindow(QMainWindow):
         self.sync_toggle.setChecked(bool(getattr(self.settings,"display_sync",False)))
         self.apply_resource_mode(getattr(self.settings, "performance_mode", "Ultra Low Resource"))
         self._setup_tray()
+        if start_discovery:QTimer.singleShot(0,self.scan_for_displays)
         QTimer.singleShot(0,self.restore_desired_outputs)
 
     def _media_dialog_directory(self): return media_dialog_start_directory(self.settings.last_media_directory, self.base / "media")
@@ -1428,38 +1454,48 @@ class MainWindow(QMainWindow):
         for card in self.cards:card.brightness_slider.setValue(value)
 
     def scan_for_displays(self):
-        active=getattr(self,"_display_scan_thread",None)
-        if active is not None and active.is_alive():return False
-        self._display_scan_shutting_down=False;self._display_scan_buttons=[]
-        for button in self.findChildren(QPushButton):
-            if button.text() in {"Scan for Displays","Scan / Refresh"}:
-                self._display_scan_buttons.append((weakref.ref(button),button.text()));button.setEnabled(False);button.setText("Scanning…")
+        if getattr(self,"_display_scan_shutting_down",False):return False
+        self._display_scan_generation+=1;generation=self._display_scan_generation
+        if not getattr(self,"_display_scan_buttons",None):
+            self._display_scan_buttons=[]
+            for button in self.findChildren(QPushButton):
+                if button.text() in {"Scan for Displays","Scan / Refresh"}:
+                    self._display_scan_buttons.append((weakref.ref(button),button.text()));button.setEnabled(False);button.setText("Scanning…")
         self.display_count_label.setText("Displays: scanning…")
         bridge=getattr(self,"_display_scan_bridge",None)
         if bridge is None:
             bridge=DisplayScanBridge(self);bridge.resultsReady.connect(self._display_scan_completed,Qt.QueuedConnection);bridge.failed.connect(self._display_scan_failed,Qt.QueuedConnection);self._display_scan_bridge=bridge
         def work():
-            try:bridge.resultsReady.emit(tuple(self._discovery_provider()))
-            except Exception as exc:bridge.failed.emit(f"{type(exc).__name__}: {exc}")
-        thread=threading.Thread(target=work,name="Oni-Display-Scan",daemon=True);self._display_scan_thread=thread;thread.start();return True
+            try:observations=tuple(self._discovery_provider())
+            except Exception as exc:
+                try:bridge.failed.emit(generation,f"{type(exc).__name__}: {exc}")
+                except RuntimeError:pass
+                return
+            try:bridge.resultsReady.emit(generation,observations)
+            except RuntimeError:pass
+        thread=threading.Thread(target=work,name=f"Oni-Display-Scan-{generation}",daemon=True);self._display_scan_threads[generation]=thread;self._display_scan_thread=thread;thread.start();return True
 
-    def _display_scan_completed(self,observations):
-        if getattr(self,"_display_scan_shutting_down",False):return
+    def _display_scan_completed(self,generation,observations):
+        self._display_scan_threads.pop(generation,None)
+        if getattr(self,"_display_scan_shutting_down",False) or generation!=self._display_scan_generation:return
         added,removed=self.display_lifecycle.reconcile(observations);self.sync_controller=DisplaySyncController(tuple(self.cards),prepare_shared=self._prepare_shared_decode,stop_shared=self._stop_shared_decode)
         for card in self.cards:card.coordinator=self.sync_controller
         self._refresh_display_surface();self._rebuild_display_splitter()
         if hasattr(self,"monitor_service"):
             for key in added:self._wire_runtime_card(self.card_by_physical_id[key])
+            if added:QTimer.singleShot(0,self.restore_desired_outputs)
         if hasattr(self,"home_page"):self.home_page.refresh()
-        self._finish_display_scan()
+        self._finish_display_scan(generation)
 
-    def _display_scan_failed(self,message):
-        if getattr(self,"_display_scan_shutting_down",False):return
+    def _display_scan_failed(self,generation,message):
+        self._display_scan_threads.pop(generation,None)
+        if getattr(self,"_display_scan_shutting_down",False) or generation!=self._display_scan_generation:return
         import logging
         logging.getLogger("thermalright_lcd.gui").warning("Display scan failed: %s",message)
-        self._refresh_display_surface();self._finish_display_scan();QMessageBox.warning(self,"Display scan failed","Windows device discovery did not complete. Existing displays were left unchanged.\n\n"+message)
+        self._refresh_display_surface();self._finish_display_scan(generation);QMessageBox.warning(self,"Display scan failed","Windows device discovery did not complete. Existing displays were left unchanged.\n\n"+message)
 
-    def _finish_display_scan(self):
+    def _finish_display_scan(self,generation):
+        if generation!=self._display_scan_generation:return
         self._display_scan_thread=None
         for reference,text in getattr(self,"_display_scan_buttons",()):
             button=reference()
@@ -1523,6 +1559,7 @@ class MainWindow(QMainWindow):
         self.ultra_low_lbl.setText(("● "+self.settings.performance_mode) if expanded else "●"); self.ultra_low_lbl.setToolTip(self.settings.performance_mode); self.version_lbl.setVisible(expanded)
         if hasattr(self,"left"):
             for card in self.cards:QTimer.singleShot(0,card._update_preview_geometry)
+            QTimer.singleShot(0,self._balance_side_by_side_splitter)
         if save:self.store.save(self.settings)
 
     def select_page(self, index, open_dialog=True):
@@ -1703,7 +1740,7 @@ class MainWindow(QMainWindow):
 
     def shutdown(self):
         if self._shutdown_done:return
-        self._shutdown_done=True;self._display_scan_shutting_down=True
+        self._shutdown_done=True;self._display_scan_shutting_down=True;self._display_scan_generation=getattr(self,"_display_scan_generation",0)+1;self._display_scan_thread=None
         profiles={card.device_id:card.profile() for card in self.cards};self.settings.profiles[self.settings.active_profile].update(profiles)
         if self.settings.remember_window_position:
             normal=self.normalGeometry();self.settings.window_geometry=[normal.x(),normal.y(),normal.width(),normal.height()];self.settings.window_maximized=self.isMaximized()
@@ -2122,6 +2159,11 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self,event):
         super().resizeEvent(event)
+        if hasattr(self,"display_splitter"):
+            timer=getattr(self,"_side_by_side_resize_timer",None)
+            if timer is None:
+                timer=QTimer(self);timer.setSingleShot(True);timer.timeout.connect(self._balance_side_by_side_splitter);self._side_by_side_resize_timer=timer
+            timer.start(0)
         if not hasattr(self,"layout_tip"):
             self.layout_tip=QFrame(self);self.layout_tip.setObjectName("layoutRecommendation");row=QHBoxLayout(self.layout_tip);row.setContentsMargins(12,7,8,7);row.setSpacing(8);message=QLabel("For the best editing experience and access to all controls, use Oni maximized or fullscreen.");message.setWordWrap(True);dismiss=QToolButton();dismiss.setText("×");dismiss.clicked.connect(self._dismiss_layout_tip);row.addWidget(message,1);row.addWidget(dismiss)
         self.layout_tip.setFixedWidth(min(620,max(360,self.width()-40)));show=self.width()<1450 or self.height()<820
@@ -2230,13 +2272,22 @@ class MainWindow(QMainWindow):
         stacked=orientation==Qt.Vertical
         for card in self.cards:
             card.set_layout_mode(not stacked)
-            card.setMinimumHeight(350 if stacked else 0);card.setMaximumHeight(16777215);card.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Expanding)
+            card.setMinimumHeight(350 if stacked else 0);card.setMaximumHeight(16777215);card.setSizePolicy(QSizePolicy.Expanding if stacked else QSizePolicy.Ignored,QSizePolicy.Expanding)
         self.display_splitter.setMinimumHeight(max(710,350*len(self.cards)) if stacked and len(self.cards)>1 else 350 if stacked and self.cards else 0);self.display_splitter.setMaximumHeight(16777215)
         ordered=[self.card_by_id[device_id] for device_id in self.settings.display_order if device_id in self.card_by_id]
         ordered.extend(card for card in self.cards if card not in ordered)
-        for card in ordered:self.display_splitter.addWidget(card)
-        if self.settings.splitter_sizes and len(self.settings.splitter_sizes)==len(self.cards):self.display_splitter.setSizes(self.settings.splitter_sizes)
-        else:self.display_splitter.setSizes([1]*len(self.cards))
+        for index,card in enumerate(ordered):self.display_splitter.addWidget(card);self.display_splitter.setStretchFactor(index,1)
+        if stacked and self.settings.splitter_sizes and len(self.settings.splitter_sizes)==len(self.cards):self.display_splitter.setSizes(self.settings.splitter_sizes)
+        else:self.display_splitter.setSizes([1000]*len(self.cards))
+        if not stacked:
+            QTimer.singleShot(0,self._balance_side_by_side_splitter)
+            QTimer.singleShot(60,self._balance_side_by_side_splitter)
+
+    def _balance_side_by_side_splitter(self):
+        if self.display_splitter.orientation()!=Qt.Horizontal or not self.cards:return
+        available=max(1,self.display_splitter.width()-self.display_splitter.handleWidth()*(len(self.cards)-1))
+        self.display_splitter.setSizes([max(1,available//len(self.cards))]*len(self.cards))
+        for card in self.cards:card._fit_side_by_side_preview()
 
 
 STYLE = """
@@ -2919,7 +2970,7 @@ QScrollArea#pageScroll { border: none; background: transparent; }
 
 def main():
     log_path=Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"logs";configure_logging(log_path)
-    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);app.setStyleSheet(STYLE);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion("0.1.0");app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
+    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);app.setStyleSheet(STYLE);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion("0.1.1");app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
     instance=SingleInstance(os.environ.get("ONI_LCD_INSTANCE_NAME","OniThermalLcdControl-v1"),parent=app)
     if not instance.acquire_or_notify():return 0
     splash=OniSplash(bundled_path("assets/oni-thermal-lcd-icon.png"));splash.show();app.processEvents()

@@ -4,9 +4,9 @@ from dataclasses import replace
 
 from .device_discovery import DiscoveredDisplay
 from .devices.community_panels import (CommunityConnection, MODELS, jl_command,
-    lianli_packet,
+    lianli_packet, turzx_packet,
     parse_beada_info, parse_jl_device_info, parse_jonsbo_identity,
-    thermaltake_command)
+    thermaltake_command, parse_usbpc_hello, usbpc_command)
 from .devices.beadapanel_protocol import panel_link_start_tag
 from .live_state import SafetyError, TransportError
 from .reference_runtime import install_reference_binding
@@ -83,6 +83,12 @@ def _lianli_init(io):
     io.write(lianli_packet(123))
     if len(io.read(512))!=512:raise SafetyError("Lian Li stop-media probe was not acknowledged")
 
+def _turzx_init(io):
+    io.write(turzx_packet(10,timestamp=0))
+    if len(io.read(512))!=512:raise SafetyError("TURZX version probe did not return a 512-byte response")
+    io.write(turzx_packet(123,timestamp=0))
+    if len(io.read(512))!=512:raise SafetyError("TURZX stop-media probe was not acknowledged")
+
 def _serial_read_frame(io):
     raw=io.read_until_quiet()
     start=raw.find(b"\x55\xaa")
@@ -103,6 +109,14 @@ def _probe_serial(candidate, serial_factory=None):
             runtime_io.write(b"\xf0\xa5\x5a\x0f");_,runtime_size,_=parse_jonsbo_identity(runtime_io.read_until_quiet())
             if runtime_size!=model.render_size:raise SafetyError("Jonsbo identity changed during reconnect")
         return model,lambda:CommunityConnection(model,_ProbedSerialIo(candidate.port,9600,serial_factory=serial_factory,probe=validate_jonsbo))
+    if candidate.vid_pid=="1a86:5722":
+        io=PySerialIo(candidate.port,115200,rtscts=True,serial_factory=serial_factory);io.open()
+        try:io.write(bytes((69,))*6);model=parse_usbpc_hello(io.read_until_quiet()[:6])
+        finally:io.close()
+        def validate_usbpc(runtime_io):
+            runtime_io.write(bytes((69,))*6);runtime_model=parse_usbpc_hello(runtime_io.read_until_quiet()[:6])
+            if runtime_model.key!=model.key:raise SafetyError("UsbPCMonitor identity changed during reconnect")
+        return model,lambda:CommunityConnection(model,_ProbedSerialIo(candidate.port,115200,rtscts=True,serial_factory=serial_factory,probe=validate_usbpc))
     io=PySerialIo(candidate.port,2_000_000,open_delay=.2,serial_factory=serial_factory);io.open()
     try:
         io.write(b"\xff\xd9\xff\xd9\0\0\0\0");io.write(jl_command(0x06));name,size,angle=parse_jl_device_info(_serial_read_frame(io))
@@ -115,9 +129,25 @@ def _probe_serial(candidate, serial_factory=None):
 
 def enumerate_community_winusb_candidates(path_enumerator=None):
     from .windows_usb import enumerate_registered_winusb_paths
-    pairs=("4e58:1001","4e58:1002","1cbe:a088","1cbe:a092","1cbe:a068","1cbe:a034")
+    pairs=("4e58:1001","4e58:1002","1cbe:a088","1cbe:a092","1cbe:a068","1cbe:a034",
+           "1cbe:0088","1cbe:0080","1cbe:0092","1cbe:0046","1cbe:0050","1cbe:0016","1cbe:0021","345f:9132")
     items=(path_enumerator or enumerate_registered_winusb_paths)(pairs)
-    return tuple((path.lower(),vid_pid,path) for vid_pid,path in items)
+    result=[]
+    for vid_pid,path in items:
+        if vid_pid!="345f:9132":result.append((path.lower(),vid_pid,path));continue
+        # The MS9132 is composite: control is HID and pixels use interface 3.
+        # Without an unambiguous one-to-one pair we fail closed rather than
+        # attaching one panel's control plane to another panel's bulk pipe.
+        from .windows_hid import enumerate_paths,inspect_path
+        hid=[]
+        for candidate in enumerate_paths():
+            try:
+                info=inspect_path(candidate)
+                if (info.vid,info.pid)==(0x345f,0x9132) and info.feature_report_bytes==9:hid.append(candidate)
+            except Exception:pass
+        matching=[item for item in items if item[0]=="345f:9132"]
+        if len(hid)==1 and len(matching)==1:result.append((path.lower(),vid_pid,path,hid[0]))
+    return tuple(result)
 
 def discover_community_displays(*, serial_candidates=None, hid_paths=None, hid_inspector=None, hid_api=None, winusb_candidates=None, winusb_api=None, serial_factory=None):
     results=[]
@@ -143,16 +173,35 @@ def discover_community_displays(*, serial_candidates=None, hid_paths=None, hid_i
     if candidates:
         from .windows_usb import CtypesWinUsbApi
         api_factory=(lambda:winusb_api) if winusb_api is not None else CtypesWinUsbApi
-        for stable,vid_pid,path in candidates:
+        for candidate in candidates:
+            stable,vid_pid,path=candidate[:3]
             try:
                 probe_api=api_factory()
                 if vid_pid.startswith("4e58:"):
                     probe=_WinUsbIo(path,probe_api,0x02,0x82,_beada_init);probe.open();model=probe.detected_model;probe.close()
                     factory=lambda p=path,m=model:CommunityConnection(m,_WinUsbIo(p,api_factory(),0x02,0x82,_beada_init))
+                elif vid_pid.startswith("1cbe:"):
+                    key={"1cbe:a088":"lianli-88","1cbe:a092":"lianli-92","1cbe:a068":"lianli-oled","1cbe:a034":"lianli-lcd",
+                         "1cbe:0088":"turzx-88","1cbe:0080":"turzx-8","1cbe:0092":"turzx-92","1cbe:0046":"turzx-46",
+                         "1cbe:0050":"turzx-5","1cbe:0016":"turzx-16","1cbe:0021":"turzx-21"}[vid_pid];model=MODELS[key]
+                    is_turzx=model.protocol=="turzx-jpeg";initializer=_turzx_init if is_turzx else _lianli_init
+                    probe=_WinUsbIo(path,probe_api,0x01,0x81,initializer);probe.open();probe.close()
+                    close=turzx_packet(123,timestamp=0) if is_turzx else lianli_packet(123)
+                    factory=lambda p=path,m=model,i=initializer,c=close:CommunityConnection(m,_WinUsbIo(p,api_factory(),0x01,0x81,i),close_command=c)
                 else:
-                    key={"1cbe:a088":"lianli-88","1cbe:a092":"lianli-92","1cbe:a068":"lianli-oled","1cbe:a034":"lianli-lcd"}[vid_pid];model=MODELS[key]
-                    probe=_WinUsbIo(path,probe_api,0x01,0x81,_lianli_init);probe.open();probe.close()
-                    factory=lambda p=path,m=model:CommunityConnection(m,_WinUsbIo(p,api_factory(),0x01,0x81,_lianli_init),close_command=lianli_packet(123))
+                    if len(candidate)!=4:raise SafetyError("MS9132 requires an unambiguous HID/bulk interface pair")
+                    from .devices.ms9132 import Ms9132Connection,probe_ms9132_model
+                    hid_path=candidate[3];model=probe_ms9132_model(hid_path,api)
+                    # Verify that interface 3 exposes the captured bulk OUT pipe
+                    # before registering a dynamic DisplaySession.
+                    handle=probe_api.create_file(path,5000);usb=None
+                    try:
+                        usb=probe_api.winusb_initialize(handle);pipe=probe_api.query_pipe(usb,0,0x04)
+                        if pipe.get("type")!=2:raise SafetyError("MS9132 endpoint 0x04 is not bulk OUT")
+                    finally:
+                        if usb:probe_api.free(usb)
+                        probe_api.close_handle(handle)
+                    factory=lambda p=path,h=hid_path,m=model:Ms9132Connection(m,h,p,api,api_factory())
                 binding=install_reference_binding(stable,model,factory,namespace="community-ref");results.append(DiscoveredDisplay(stable,binding.device_id,"connected",model.name))
             except Exception as exc:results.append(DiscoveredDisplay(stable,f"unsupported:{vid_pid}","blocked",str(exc)))
     return tuple(results)

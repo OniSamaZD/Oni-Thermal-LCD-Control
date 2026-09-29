@@ -1,5 +1,5 @@
 #define AppName "Oni Thermal LCD Control"
-#define AppVersion "0.1.0"
+#define AppVersion "0.1.1"
 #define AppPublisher "Oni Thermal LCD contributors"
 #define AppExeName "Oni Thermal LCD Control.exe"
 

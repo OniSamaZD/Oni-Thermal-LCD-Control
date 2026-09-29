@@ -2,22 +2,19 @@
 from __future__ import annotations
 import ctypes as c
 from ctypes import wintypes as w
-import json,subprocess
-from .subprocess_utils import hidden_subprocess_kwargs
 from .devices.thermalright_reference import build_scsi_cdb,detect_model,frame_packets
 from .encoder import EncodedFrame
 
 IOCTL_SCSI_PASS_THROUGH_DIRECT=0x4D014;GENERIC_READ=0x80000000;GENERIC_WRITE=0x40000000
 
-def enumerate_scsi_candidates(runner=subprocess.run):
-    script=("Get-CimInstance Win32_DiskDrive|ForEach-Object {[ordered]@{path=$_.DeviceID;pnp=$_.PNPDeviceID;model=$_.Model;status=$_.Status}}|ConvertTo-Json -Compress")
-    cp=runner(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
-    if cp.returncode:raise RuntimeError("SCSI disk enumeration failed")
-    raw=json.loads(cp.stdout or "[]");raw=[raw] if isinstance(raw,dict) else raw;out=[]
-    for item in raw:
+def enumerate_scsi_candidates(api=None):
+    """Enumerate SCSI-backed USBLCD disks without CIM or a shell process."""
+    from .windows_metadata import CtypesWindowsMetadataApi
+    out=[]
+    for item in (api or CtypesWindowsMetadataApi()).enumerate_disk_interfaces():
         pnp=str(item.get("pnp") or "").lower();model=str(item.get("model") or "")
         vp=next((x for x in ("87cd:70db","0402:3922","0416:5406") if f"vid_{x[:4]}&pid_{x[5:]}" in pnp),None)
-        if vp and "usblcd" in model.lower() and str(item.get("status") or "OK").upper()=="OK":out.append((item["path"],vp))
+        if vp and "usblcd" in model.lower() and str(item.get("status") or "OK").upper()=="OK":out.append((str(item["path"]),vp))
     return tuple(out)
 
 class CtypesScsiApi:

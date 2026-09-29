@@ -1,6 +1,6 @@
 [project]
 name = "thermalright-lcd"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows control application for supported Thermalright USB LCD displays"
 readme = "README.md"
 license = { file = "LICENSE" }

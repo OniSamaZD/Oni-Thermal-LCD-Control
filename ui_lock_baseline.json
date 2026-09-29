@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "algorithm": "source-block-sha256-v1",
-  "approved_gui_sha256": "082eccf8db7a53daebbc7c67cdac13c544a6febc9ac8d856e50e5b8342687fd2",
+  "approved_gui_sha256": "ae0bc2a558e37ce343ab88703d1ee400a632bd40c54448179ae26f7f646eec77",
   "protected": {
     "PreviewLabel.__init__": "ae324e45d9075e6efb665e2dfd9ab2aa0d5ceeb9637ad0490c8da58141e2462b",
     "PreviewLabel.sizeHint": "833025f6f69983b3d85ddf96d4787c9c242dfdf47c06d67fda1acc4fea90b853",
@@ -11,21 +11,21 @@
     "HardwareMonitorDialog.__init__": "a2c2740b3d44e08155a0e62cc6773639c6a40e6b43ec4734f76a912c9b83f2f8",
     "ProfileManagerDialog.__init__": "7f1f87ba211429727dd8cedd1e145fcf44471831621139cdc6c71f3b55864ea8",
     "DisplayCard.__init__": "055a3dbb2f91b0ff6e3d9701bb783bed0e8ee8b224f6c4e8a59c5b0523a0db21",
-    "DisplayCard._fit_side_by_side_preview": "9ff7645925fde269a6d4c5a0c3aba40e3dddaf710d9fe53c1da14d003d763c00",
-    "DisplayCard.sizeHint": "2bef2c4f6b01128f0c4cf45ad1d18280d93007e2cc688a88315406911a833dd9",
-    "DisplayCard.set_layout_mode": "e822f09ce341e1138df45a2f7149237bd18ba2c8c9cb361bbcc58119d152ce63",
-    "DisplayCard.resizeEvent": "6aa04405e74c1365440fc3008439fa2eb7e46573ed6e99d7a4e1ce08c5b820aa",
-    "MainWindow.__init__": "faa4fe47717c326e1baa3a1bcdb09b08a9dd0be22e5a3050828563f4924b638b",
+    "DisplayCard._fit_side_by_side_preview": "cbf03a284a7922b4a928742b313c6ba6602373c193adada61f4565c2b5b031d2",
+    "DisplayCard.sizeHint": "9fd71eb42d2b98fa794765275b4daa1e01e694221785eff7a8336a4fa0ee8120",
+    "DisplayCard.set_layout_mode": "9f661520420ac21f2514d9bd50578c2996f2b4d7c224581d2da1c04184181c84",
+    "DisplayCard.resizeEvent": "3a551e65a0a5deb9b7dcaa88df177762f10bacb09b7c52ec25171ada2b954ed9",
+    "MainWindow.__init__": "16ee392157fb0f65396e755a1385d4200be9cbd7cabaf5761734f1dd7f6cca36",
     "MainWindow.set_display_layout": "22bc22209589c7440ba873681195a3ee33990487fbf68b17188266deeb091727",
     "MainWindow.swap_display_order": "e199200aee0f13d666f8002f2aaf085f3b26d0ac27889c4a6735a7656074f6a4",
     "MainWindow.toggle_sidebar": "2ffd93e4a7cc32bc0d2784d66b952c684da81230d6a50dfb8551f96c44844766",
-    "MainWindow.set_sidebar_expanded": "ad47917d9ee48caba4d9172cde69afc47c0fce322f264dcd7f2432662c72fb0a",
+    "MainWindow.set_sidebar_expanded": "dac8efe124e3ef51aad4c85d3ddd7a432d16739a233b83783292f15a02dbe8f1",
     "MainWindow.select_page": "0acf056f32e01cce169094e94446741cf382caeb48efc8145965cb0bb69a95f1",
     "MainWindow._action_page": "b7d0a8fa27916d255c04f3f566bf830fc6b1186405e935abfaba91e6c430adf1",
     "MainWindow._hardware_monitor_page": "fae3b32aafbad5382176242b8b0512c84bf674f3ea0488d691bd5856f9830e4b",
     "MainWindow._performance_page": "5b2341c25678b20fd6720c1b6d224a4522710bb0163f78afe975ce4731f20e00",
     "MainWindow._settings_page": "cdb2041b07d390dd3afeaf2630193c96e26f34c7c6a5e2b147685e38f9a8f0ae",
     "MainWindow._diagnostics_page": "253311f8944d5ac6e4c6178925278d3f8dd7f6be3719dbd7f6055fe253c173f9",
-    "STYLE": "d2bed10ddf5642734b6f157ee2d0a374a4528fabd69977863da17ffb9d310d81"
+    "STYLE": "d69e59d9ce09bb15ede11b030fdfa6a5072f3f64c0fb87873b217295ccce329e"
   }
 }

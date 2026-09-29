@@ -43,6 +43,18 @@ MODELS = {
     "lianli-92": CommunityPanelModel("lianli-92", "Lian Li", 'Universal Screen 9.2"', "1cbe:a092", (464,1920), (464,1920), "winusb", "lianli-jpeg", "jpeg", 30),
     "lianli-oled": CommunityPanelModel("lianli-oled", "Lian Li", "HydroShift II OLED Curve", "1cbe:a068", (2288,1080), (2288,1080), "winusb", "lianli-jpeg", "jpeg", 30, "landscape"),
     "lianli-lcd": CommunityPanelModel("lianli-lcd", "Lian Li", "HydroShift II LCD", "1cbe:a034", (480,480), (480,480), "winusb", "lianli-jpeg", "jpeg", 30, "square"),
+    "jonsbo-ds339": CommunityPanelModel("jonsbo-ds339","Jonsbo","Jonsbo DS339","345f:9132",(376,960),(376,960),"winusb","ms9132-rgb888","bgr888",30),
+    "vmax-46": CommunityPanelModel("vmax-46","VMAX",'VMAX 4.6" LCD',"345f:9132",(320,960),(320,960),"winusb","ms9132-rgb888","bgr888",30),
+    "turzx-88": CommunityPanelModel("turzx-88","Turing / TURZX",'Turing Smart Screen 8.8" Rev 1.1',"1cbe:0088",(480,1920),(480,1920),"winusb","turzx-jpeg","jpeg",30),
+    "turzx-8": CommunityPanelModel("turzx-8","Turing / TURZX",'Turing Smart Screen 8"',"1cbe:0080",(800,1280),(800,1280),"winusb","turzx-jpeg","jpeg",30),
+    "turzx-92": CommunityPanelModel("turzx-92","Turing / TURZX",'Turing Smart Screen 9.2"',"1cbe:0092",(464,1920),(464,1920),"winusb","turzx-jpeg","jpeg",30),
+    "turzx-46": CommunityPanelModel("turzx-46","Turing / TURZX",'Turing Smart Screen 4.6"',"1cbe:0046",(320,960),(320,960),"winusb","turzx-jpeg","jpeg",30),
+    "turzx-5": CommunityPanelModel("turzx-5","Turing / TURZX",'Turing Smart Screen 5"',"1cbe:0050",(720,1280),(720,1280),"winusb","turzx-jpeg","jpeg",30),
+    "turzx-16": CommunityPanelModel("turzx-16","Turing / TURZX",'Turing Smart Screen 1.6"',"1cbe:0016",(400,400),(400,400),"winusb","turzx-jpeg","jpeg",30,"square"),
+    "turzx-21": CommunityPanelModel("turzx-21","Turing / TURZX",'Turing Smart Screen 2.1"',"1cbe:0021",(480,480),(480,480),"winusb","turzx-jpeg","jpeg",30,"square"),
+    "usbpc-35": CommunityPanelModel("usbpc-35","UsbPCMonitor",'UsbPCMonitor 3.5"',"1a86:5722",(320,480),(320,480),"serial","usbpc-rgb565","rgb565-rgb-le",1),
+    "usbpc-5": CommunityPanelModel("usbpc-5","UsbPCMonitor",'UsbPCMonitor 5"',"1a86:5722",(480,800),(480,800),"serial","usbpc-rgb565","rgb565-rgb-le",1),
+    "usbpc-7": CommunityPanelModel("usbpc-7","UsbPCMonitor",'UsbPCMonitor 7"',"1a86:5722",(600,1024),(600,1024),"serial","usbpc-rgb565","rgb565-rgb-le",1),
 }
 
 BEADA_MODEL_NAMES = {0:"5", 1:"7", 2:"6", 3:"3", 4:"4", 10:"5C", 11:"5T", 12:"7C", 13:"3C", 14:"4C", 15:"6C", 16:"6S", 17:"2", 18:"2W", 19:"7S", 20:"5S", 21:"8", 22:"11", 23:"9", 24:"Y", 25:"X", 26:"Z"}
@@ -124,15 +136,50 @@ def lianli_packet(command: int, payload: bytes=b"", *, timestamp: int|None=None)
     packet=encrypted[:510].ljust(510,b"\0")+b"\xa1\x1a"
     return packet+payload
 
+def turzx_packet(command:int,payload:bytes=b"",*,timestamp:int|None=None)->bytes:
+    """TURZX 512-byte DES command followed by optional image payload.
+
+    Unlike the related Lian Li implementation, the supplied Turing reference
+    zero-pads the 500-byte command buffer to the DES block boundary.
+    """
+    if len(payload)>8_000_000:raise ValueError("TURZX image exceeds safe 8 MB limit")
+    from Crypto.Cipher import DES
+    if timestamp is None:
+        import datetime
+        now=datetime.datetime.now(datetime.timezone.utc);start=datetime.datetime.combine(now.date(),datetime.time(),tzinfo=datetime.timezone.utc)
+        timestamp=int((now-start).total_seconds()*1000)
+    command_data=bytearray(500);command_data[0]=command;command_data[2:4]=b"\x1a\x6d";command_data[4:8]=struct.pack("<I",timestamp&0xffffffff)
+    if command in (101,102):command_data[8:12]=struct.pack(">I",len(payload))
+    encrypted=DES.new(b"slv3tuzx",DES.MODE_CBC,b"slv3tuzx").encrypt(bytes(command_data).ljust(504,b"\0"))
+    return encrypted+b"\0"*6+b"\xa1\x1a"+payload
+
+def usbpc_command(command:int,x:int=0,y:int=0,ex:int=0,ey:int=0)->bytes:
+    if not all(0<=value<=1023 for value in (x,y,ex,ey)):raise ValueError("UsbPCMonitor coordinates exceed 10-bit protocol")
+    return bytes((x>>2,((x&3)<<6)|(y>>4),((y&15)<<4)|(ex>>6),((ex&63)<<2)|(ey>>8),ey&255,command&255))
+
+def parse_usbpc_hello(response:bytes)->CommunityPanelModel:
+    key={b"\x01"*6:"usbpc-35",b"\x02"*6:"usbpc-5",b"\x03"*6:"usbpc-7"}.get(bytes(response))
+    if key is None:raise SafetyError(f"unknown or ambiguous UsbPCMonitor HELLO response {bytes(response).hex()}")
+    return MODELS[key]
+
 
 def encode_community(model: CommunityPanelModel, jpeg: bytes|None=None, pixels: bytes|None=None) -> EncodedFrame:
-    raw=pixels if model.pixel_format.startswith("rgb565") else jpeg
+    raw=pixels if model.pixel_format.startswith("rgb565") or model.pixel_format=="bgr888" else jpeg
     if raw is None: raise ValueError(f"{model.pixel_format} payload required")
     if model.protocol=="raw-jpeg":writes=(raw,)
     elif model.protocol=="jl-jpeg":writes=jl_frame(raw)
     elif model.protocol=="by-hid-jpeg":writes=thermaltake_frame(raw)
     elif model.protocol=="lianli-jpeg":writes=(lianli_packet(101,raw),)
+    elif model.protocol=="turzx-jpeg":writes=(turzx_packet(101,raw),)
+    elif model.protocol=="usbpc-rgb565":
+        width,height=model.render_size
+        if len(raw)!=width*height*2:raise ValueError("UsbPCMonitor RGB565 payload has wrong length")
+        row_chunk=width*8*2
+        writes=(usbpc_command(197,0,0,width-1,height-1),)+tuple(raw[offset:offset+row_chunk] for offset in range(0,len(raw),row_chunk))
     elif model.protocol=="panel-link":writes=(raw,)
+    elif model.protocol=="ms9132-rgb888":
+        from .ms9132 import ms9132_frame
+        writes=(ms9132_frame(model,raw),)
     else:raise ValueError(f"unsupported community protocol {model.protocol}")
     return EncodedFrame(model.key,model.render_size,len(raw),hashlib.sha256(raw).hexdigest(),writes,f"community-{model.protocol}-{model.pixel_format}")
 

@@ -5,7 +5,7 @@ import time
 import shutil
 import subprocess
 import os
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -99,18 +99,20 @@ class OpenCvVideoSource:
 
 class PyAvVideoSource:
     """In-process libavcodec decoder with native early scale and no helper process."""
-    def __init__(self,path:Path,decode_size:tuple[int,int]|None=None,loop:bool=True,thread_count:int=1,cover:bool=True,hardware_acceleration:str|None="auto"):
+    def __init__(self,path:Path,decode_size:tuple[int,int]|None=None,loop:bool=True,thread_count:int=1,cover:bool=True,hardware_acceleration:str|None="auto",allow_hardware_fallback:bool=True):
         import av
         self.av=av;self.path=Path(path);self.loop=loop;self.hwaccel=None
         self.container=av.open(str(path));probe_stream=self.container.streams.video[0]
         selected="d3d11va" if hardware_acceleration=="auto" and (probe_stream.codec_context.name in {"hevc","h265"} or probe_stream.codec_context.width*probe_stream.codec_context.height>1920*1080) else None if hardware_acceleration=="auto" else hardware_acceleration
         if selected:
             from av.codec.hwaccel import HWAccel
-            try:self.container.close();self.hwaccel=HWAccel(selected,allow_software_fallback=True);self.container=av.open(str(path),hwaccel=self.hwaccel)
-            except Exception:self.hwaccel=None;self.container=av.open(str(path))
+            try:self.container.close();self.hwaccel=HWAccel(selected,allow_software_fallback=allow_hardware_fallback);self.container=av.open(str(path),hwaccel=self.hwaccel)
+            except Exception:
+                if not allow_hardware_fallback:raise
+                self.hwaccel=None;self.container=av.open(str(path))
         self.stream=self.container.streams.video[0]
         self.stream.thread_type="AUTO";self.stream.codec_context.thread_count=max(1,int(thread_count));rate=self.stream.average_rate or self.stream.base_rate
-        self.source_fps=float(rate) if rate else 30.0;self.fps=self.source_fps;self.index=0;self.backend=f"In-process PyAV {selected.upper()} (fallback allowed)" if self.hwaccel else "In-process PyAV software";self.decoder_threads=self.stream.codec_context.thread_count;self.sequential_stream=True
+        self.source_fps=float(rate) if rate else 30.0;self.fps=self.source_fps;self.index=0;self.requested_hwaccel=selected;self.allow_hardware_fallback=allow_hardware_fallback;self.hardware_active=False;self.decoded_frame_format="";self.transfer_conversion_ms=deque(maxlen=2048) if os.environ.get("ONI_LCD_PROFILE_STAGES")=="1" else None;self.backend=f"In-process PyAV {selected.upper()} (pending verification)" if self.hwaccel else "In-process PyAV software";self.decoder_threads=self.stream.codec_context.thread_count;self.sequential_stream=True
         source_w=max(1,int(self.stream.codec_context.width));source_h=max(1,int(self.stream.codec_context.height));self.output_size=None
         if decode_size:
             target_w,target_h=decode_size;ratio=(max(target_w/source_w,target_h/source_h) if cover else min(target_w/source_w,target_h/source_h));scale=min(1.0,ratio);self.output_size=(max(1,round(source_w*scale)),max(1,round(source_h*scale)))
@@ -125,8 +127,14 @@ class PyAvVideoSource:
             self.container.seek(0,stream=self.stream);self._frames=self._decode();self.index=0
             try:frame=next(self._frames)
             except StopIteration:return None
+        context_format=getattr(self.stream.codec_context.format,"name","");self.hardware_active=bool(self.requested_hwaccel and context_format in {"d3d11","d3d11va_vld"});self.decoded_frame_format=getattr(frame.format,"name","")
+        if self.requested_hwaccel and not self.hardware_active and not self.allow_hardware_fallback:raise RuntimeError(f"{self.requested_hwaccel} hardware decode was not activated (decoder format: {context_format or 'unknown'})")
+        self.backend=(f"In-process PyAV {self.requested_hwaccel.upper()} verified" if self.hardware_active else "In-process PyAV software")
+        conversion_started=time.perf_counter()
         if self.output_size:frame=frame.reformat(width=self.output_size[0],height=self.output_size[1],format="bgr24",interpolation="BILINEAR")
-        bgr=frame.to_ndarray(format="bgr24");pts=(float(frame.time) if frame.time is not None else self.index/self.source_fps)
+        bgr=frame.to_ndarray(format="bgr24")
+        if self.transfer_conversion_ms is not None:self.transfer_conversion_ms.append((time.perf_counter()-conversion_started)*1000)
+        pts=(float(frame.time) if frame.time is not None else self.index/self.source_fps)
         result=MediaFrame(None,1/self.source_fps,self.index,pts,bgr);self.index+=1;return result
     def skip(self,count:int)->int:
         skipped=0
@@ -194,7 +202,7 @@ def open_frame_source(path:Path,loop:bool=True,decode_size:tuple[int,int]|None=N
         fallback_reason="scaled FFmpeg path unavailable"
         decoder=(decoder_backend or os.environ.get("ONI_LCD_DECODER","external")).lower()
         if decoder=="pyav":
-            try:return PyAvVideoSource(path,decode_size,loop,cover=decode_cover)
+            try:return PyAvVideoSource(path,decode_size,loop,cover=decode_cover,hardware_acceleration=None)
             except Exception as exc:fallback_reason=f"PyAV failed: {type(exc).__name__}: {exc}"
         elif decoder=="opencv":return OpenCvVideoSource(path,loop)
         if prefer_scaled_ffmpeg and decode_size and shutil.which("ffmpeg"):
@@ -212,14 +220,22 @@ class SchedulerMetrics:
 class FrameScheduler:
     """Two-stage, single-slot scheduler: decode timing never builds a frame backlog."""
     def __init__(self,source:FrameSource,deliver:Callable[[MediaFrame],None],target_fps:float|None=None,
-                 clock:Callable=time.perf_counter,sleep:Callable=time.sleep,start_epoch:float|None=None):
+                 clock:Callable=time.perf_counter,sleep:Callable=time.sleep,start_epoch:float|None=None,inline_delivery:bool=False):
         if target_fps is not None and not 1<=target_fps<=240:raise ValueError("target_fps outside 1..240")
-        self.source=source;self.deliver=deliver;self.target_fps=target_fps;self.clock=clock;self.sleep=sleep;self.start_epoch=start_epoch
+        self.source=source;self.deliver=deliver;self.target_fps=target_fps;self.clock=clock;self.sleep=sleep;self.start_epoch=start_epoch;self.inline_delivery=inline_delivery
         self.metrics=SchedulerMetrics();self._stop=threading.Event();self._paused=threading.Event();self._thread=None;self._delivery_thread=None;self._condition=threading.Condition();self._latest=None;self._decode_done=False;self._source_closed=False;self.worker_starts=0
+        profile_stages=os.environ.get("ONI_LCD_PROFILE_STAGES")=="1";self.decode_durations_ms=deque(maxlen=2048) if profile_stages else None;self.delivery_durations_ms=deque(maxlen=2048) if profile_stages else None
+    def _next_frame(self):
+        if self.decode_durations_ms is None:return self.source.next_frame()
+        started=time.perf_counter()
+        try:return self.source.next_frame()
+        finally:self.decode_durations_ms.append((time.perf_counter()-started)*1000)
     def start(self):
         if self.is_active:return False
         self._stop.clear();self._paused.clear();self._decode_done=False;self._latest=None
-        self._delivery_thread=threading.Thread(target=self._deliver_latest,name="media-delivery",daemon=True);self._thread=threading.Thread(target=self._run,name="media-decoder",daemon=True);self.worker_starts+=2;self._delivery_thread.start();self._thread.start();return True
+        self._delivery_thread=None if self.inline_delivery else threading.Thread(target=self._deliver_latest,name="media-delivery",daemon=True);self._thread=threading.Thread(target=self._run,name="media-decoder",daemon=True);self.worker_starts+=1+int(self._delivery_thread is not None)
+        if self._delivery_thread:self._delivery_thread.start()
+        self._thread.start();return True
     @property
     def is_active(self):return bool((self._thread and self._thread.is_alive()) or (self._delivery_thread and self._delivery_thread.is_alive()))
     @property
@@ -248,7 +264,7 @@ class FrameScheduler:
         if skip:return int(skip(count))
         skipped=0
         for _ in range(count):
-            frame=self.source.next_frame()
+            frame=self._next_frame()
             if frame is None:break
             try:
                 if frame.image is not None:frame.image.close()
@@ -256,7 +272,7 @@ class FrameScheduler:
             skipped+=1
         return skipped
     def _run(self):
-        due=max(self.clock(),self.start_epoch or 0);timeline_started=due;paused_total=0.0;pause_mark=None;last_pts=-1.0;interval_hint=1/self.target_fps if self.target_fps else 1/30;decode_started=self.clock()
+        due=max(self.clock(),self.start_epoch or 0);timeline_started=due;paused_total=0.0;pause_mark=None;last_pts=-1.0;interval_hint=1/self.target_fps if self.target_fps else 1/30;decode_started=self.clock();delivery_started_at=self.clock()
         try:
             while not self._stop.is_set():
                 if self._paused.is_set():
@@ -268,10 +284,16 @@ class FrameScheduler:
                 if now<due:self.sleep(min(due-now,.05));continue
                 if now>due+interval_hint:
                     count=min(120,int((now-due)//interval_hint));skipped=self._skip(count);self.metrics.decoded+=skipped;self.metrics.dropped+=max(skipped,count if getattr(self.source,"sequential_stream",False) else skipped);due=(now if getattr(self.source,"sequential_stream",False) else due+skipped*interval_hint)
-                frame=self.source.next_frame()
+                frame=self._next_frame()
                 if frame is None:break
                 if frame.pts_seconds<last_pts:timeline_started=self.clock();paused_total=0.0
                 timeline_now=max(0.0,self.clock()-timeline_started-paused_total)
+                if getattr(self.source,"sequential_stream",False) and frame.pts_seconds+frame.duration_seconds<timeline_now:
+                    # A sequential decoder cannot seek past stale frames for
+                    # free. Rebase to the frame it actually produced instead
+                    # of decoding an ever-growing catch-up burst that never
+                    # reaches the output workers.
+                    timeline_started=self.clock()-frame.pts_seconds;paused_total=0.0;timeline_now=frame.pts_seconds
                 while frame.pts_seconds+frame.duration_seconds<timeline_now and not self._stop.is_set():
                     try:
                         if frame.image is not None:frame.image.close()
@@ -284,7 +306,12 @@ class FrameScheduler:
                 self.metrics.decoded+=1
                 self.metrics.decode_fps=self.metrics.decoded/max(.001,self.clock()-decode_started)
                 interval=max(frame.duration_seconds,1/self.target_fps) if self.target_fps else frame.duration_seconds
-                interval_hint=interval;self._offer(frame);due+=interval
+                interval_hint=interval
+                if self.inline_delivery:
+                    delivery_started=time.perf_counter();self.deliver(frame);elapsed_ms=(time.perf_counter()-delivery_started)*1000;self.metrics.delivered+=1;self.metrics.mean_delivery_ms+=(elapsed_ms-self.metrics.mean_delivery_ms)/self.metrics.delivered;self.metrics.actual_fps=self.metrics.delivered/max(.001,self.clock()-delivery_started_at)
+                    if self.delivery_durations_ms is not None:self.delivery_durations_ms.append(elapsed_ms)
+                else:self._offer(frame)
+                due+=interval
         except Exception as exc:self.metrics.last_error=str(exc)
         finally:
             self._decode_done=True
@@ -306,6 +333,7 @@ class FrameScheduler:
                         if frame.image is not None:frame.image.close()
                     except Exception:pass
                 self.metrics.delivered+=1;elapsed_ms=(time.perf_counter()-delivery_started)*1000;self.metrics.mean_delivery_ms += (elapsed_ms-self.metrics.mean_delivery_ms)/self.metrics.delivered;self.metrics.actual_fps=self.metrics.delivered/max(.001,self.clock()-started)
+                if self.delivery_durations_ms is not None:self.delivery_durations_ms.append(elapsed_ms)
         except Exception as exc:self.metrics.last_error=str(exc);self._stop.set()
         finally:
             if self._decode_done:self._close_source()
@@ -339,7 +367,7 @@ class FrameScheduler:
 class SharedFrameScheduler:
     """One decoder feeding independent bounded latest-frame consumer slots."""
     def __init__(self,source:FrameSource,consumers:dict[str,Callable[[MediaFrame],None]],target_fps:float|None=None,start_epoch:float|None=None):
-        self.source=source;self.consumers=dict(consumers);self.target_fps=target_fps;self.start_epoch=start_epoch;self.started_at=0.0;self._stop=threading.Event();self._condition=threading.Condition();self._latest={name:None for name in consumers};self._enabled={name:True for name in consumers};self._workers=[];self.dropped=defaultdict(int);self.delivered=defaultdict(int);self.errors={};self.scheduler=FrameScheduler(source,self._fanout,target_fps,start_epoch=start_epoch)
+        self.source=source;self.consumers=dict(consumers);self.target_fps=target_fps;self.start_epoch=start_epoch;self.started_at=0.0;self._stop=threading.Event();self._condition=threading.Condition();self._latest={name:None for name in consumers};self._enabled={name:True for name in consumers};self._workers=[];self.dropped=defaultdict(int);self.delivered=defaultdict(int);self.errors={};self.scheduler=FrameScheduler(source,self._fanout,target_fps,start_epoch=start_epoch,inline_delivery=True)
     def _fanout(self,frame:MediaFrame):
         with self._condition:
             for name in self.consumers:

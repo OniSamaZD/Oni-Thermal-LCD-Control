@@ -108,6 +108,33 @@ def test_sequential_decoder_drops_deadline_without_decoding_stale_frames():
     assert scheduler._skip(50)==0 and source.skip_calls==0
 
 
+def test_slow_sequential_decoder_rebases_instead_of_catchup_burst():
+    import threading,time
+    delivered=[];ready=threading.Event()
+    class Source:
+        sequential_stream=True
+        def __init__(self):self.index=0
+        def next_frame(self):
+            time.sleep(.012);index=self.index;self.index+=1
+            return MediaFrame(None,.004,index,index*.004,None)
+        def close(self):pass
+    source=Source();scheduler=FrameScheduler(source,lambda frame:(delivered.append(frame.index),ready.set() if len(delivered)>=5 else None),target_fps=240)
+    scheduler.start();ready.wait(1);scheduler.stop()
+    assert len(delivered)>=5
+    assert source.index<=len(delivered)+3
+
+
+def test_stage_timing_is_bounded_and_opt_in(monkeypatch):
+    class Source:
+        def next_frame(self):return None
+        def close(self):pass
+    assert FrameScheduler(Source(),lambda _:None).decode_durations_ms is None
+    monkeypatch.setenv("ONI_LCD_PROFILE_STAGES","1")
+    scheduler=FrameScheduler(Source(),lambda _:None);scheduler._next_frame()
+    assert scheduler.decode_durations_ms.maxlen==2048
+    assert len(scheduler.decode_durations_ms)==1
+
+
 def test_hardware_decode_failure_reports_cpu_fallback(tmp_path):
     media=tmp_path/"video.mp4";media.write_bytes(b"fixture")
     fallback=Mock();fallback.backend="CPU fallback"
@@ -121,6 +148,13 @@ def test_pyav_in_process_early_scale_has_no_helper_process(tmp_path):
     source=open_frame_source(media,decode_size=(32,18),decode_cover=False,decoder_backend="pyav");frame=source.next_frame()
     assert source.backend.startswith("In-process PyAV") and frame.native_bgr.shape[1::-1]==(32,18)
     assert not hasattr(source,"process");source.close()
+
+
+def test_normal_pyav_decode_selection_remains_software(tmp_path):
+    media=tmp_path/"video.mp4";media.write_bytes(b"fixture");source=Mock()
+    with patch("thermalright_lcd.playback.PyAvVideoSource",return_value=source) as factory:
+        assert open_frame_source(media,decoder_backend="pyav") is source
+    assert factory.call_args.kwargs["hardware_acceleration"] is None
 
 
 def test_game_mode_reduces_preview_and_metrics_frequency():

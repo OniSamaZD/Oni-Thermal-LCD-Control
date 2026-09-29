@@ -29,7 +29,7 @@ def install_reference_binding(stable_id: str, model, sender_factory, *, namespac
         model.protocol in {"trofeo-bulk","trofeo-bulk-ly1","ali"},
         full_frame_jpeg_required=model.pixel_format=="jpeg",transport_factory="reference-runtime",
         connection_type={"hid":"HID","winusb":"WinUSB","scsi":"SCSI pass-through","serial":"USB serial"}[model.transport],
-        support_status="Implemented — community hardware validation required",maximum_fps=30,
+        support_status="Implemented — community hardware validation required",maximum_fps=int(getattr(model,"maximum_fps",30)),
     )
     from .persistence import POLICIES,VIDEO_TRANSPORT_TARGETS,PersistencePolicy
     POLICIES[device_id]=PersistencePolicy(device_id,5.0,5.0,.2,True,

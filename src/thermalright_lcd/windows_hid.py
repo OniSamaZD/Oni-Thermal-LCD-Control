@@ -1,9 +1,6 @@
 from __future__ import annotations
 import ctypes as c
 from copy import deepcopy
-import json
-import subprocess
-from .subprocess_utils import hidden_subprocess_kwargs
 from ctypes import wintypes as w
 from dataclasses import dataclass
 from typing import Protocol
@@ -21,7 +18,7 @@ ERROR_DEVICE_NOT_CONNECTED=1167
 
 @dataclass(frozen=True)
 class HidInterface:
-    path:str; vid:int; pid:int; version:int; input_report_bytes:int; output_report_bytes:int
+    path:str; vid:int; pid:int; version:int; input_report_bytes:int; output_report_bytes:int; feature_report_bytes:int=0
 
 class _GUID(c.Structure):
     _fields_=[("Data1",w.DWORD),("Data2",w.WORD),("Data3",w.WORD),("Data4",c.c_ubyte*8)]
@@ -57,7 +54,7 @@ def inspect_path(path:str, api=None)->HidInterface:
         if not h.HidD_GetAttributes(handle,c.byref(attr)): raise OSError(c.get_last_error(),"HidD_GetAttributes")
         if not h.HidD_GetPreparsedData(handle,c.byref(prep)): raise OSError(c.get_last_error(),"HidD_GetPreparsedData")
         if h.HidP_GetCaps(prep,c.byref(caps))<0: raise OSError("HidP_GetCaps")
-        return HidInterface(path,attr.VendorID,attr.ProductID,attr.VersionNumber,caps.InputReportByteLength,caps.OutputReportByteLength)
+        return HidInterface(path,attr.VendorID,attr.ProductID,attr.VersionNumber,caps.InputReportByteLength,caps.OutputReportByteLength,caps.FeatureReportByteLength)
     finally:
         if prep:h.HidD_FreePreparsedData(prep)
         k.CloseHandle(handle)
@@ -76,6 +73,8 @@ class WindowsHidApi(Protocol):
     def open(self,path:str): ...
     def write_report(self,handle,data:bytes,timeout_ms:int)->int: ...
     def read_report(self,handle,length:int,timeout_ms:int)->bytes: ...
+    def set_feature(self,handle,data:bytes)->None: ...
+    def get_feature(self,handle,length:int)->bytes: ...
     def cancel(self,handle)->None: ...
     def close(self,handle)->None: ...
 
@@ -95,6 +94,9 @@ class CtypesWindowsHidApi:
         self.k.GetOverlappedResult.argtypes=[w.HANDLE,c.POINTER(_OVERLAPPED),c.POINTER(w.DWORD),w.BOOL];self.k.GetOverlappedResult.restype=w.BOOL
         self.k.CancelIoEx.argtypes=[w.HANDLE,c.POINTER(_OVERLAPPED)];self.k.CancelIoEx.restype=w.BOOL
         self.k.CloseHandle.argtypes=[w.HANDLE];self.k.CloseHandle.restype=w.BOOL
+        self.h=c.WinDLL("hid",use_last_error=True)
+        self.h.HidD_SetFeature.argtypes=[w.HANDLE,c.c_void_p,w.ULONG];self.h.HidD_SetFeature.restype=w.BOOL
+        self.h.HidD_GetFeature.argtypes=[w.HANDLE,c.c_void_p,w.ULONG];self.h.HidD_GetFeature.restype=w.BOOL
         self._events={};self._write_buffers={};self._read_buffers={}
     def open(self,path):
         handle=self.k.CreateFileW(path,0xC0000000,3,None,3,FILE_FLAG_OVERLAPPED,None)
@@ -133,6 +135,13 @@ class CtypesWindowsHidApi:
         raise TransportError(f"{operation} failed: {code}")
     def write_report(self,handle,data,timeout_ms):return self._io(handle,data,timeout_ms,True)
     def read_report(self,handle,length,timeout_ms):return self._io(handle,length,timeout_ms,False)
+    def set_feature(self,handle,data):
+        buffer=c.create_string_buffer(data)
+        if not self.h.HidD_SetFeature(handle,buffer,len(data)):raise TransportError(f"HidD_SetFeature failed: {c.get_last_error()}")
+    def get_feature(self,handle,length):
+        buffer=c.create_string_buffer(length)
+        if not self.h.HidD_GetFeature(handle,buffer,length):raise TransportError(f"HidD_GetFeature failed: {c.get_last_error()}")
+        return buffer.raw
     def cancel(self,handle):
         if handle not in (None,INVALID_HANDLE_VALUE):self.k.CancelIoEx(handle,None)
     def close(self,handle):
@@ -180,44 +189,46 @@ class RealHidTransport(UsbTransport):
             try:self.api.cancel(handle)
             finally:self.api.close(handle)
 
-def discover_hid_identity(target:dict,api=None)->DeviceIdentity:
+def discover_hid_identity(target:dict,api=None,snapshot=None)->DeviceIdentity:
     """Fresh HID capability discovery plus stable parent/container validation."""
+    if snapshot is None:
+        from .windows_metadata import collect_windows_metadata_snapshot
+        snapshot=collect_windows_metadata_snapshot()
     info=discover_5302(api)
     if info.input_report_bytes!=target["hid_input_report_bytes"] or info.output_report_bytes!=target["hid_output_report_bytes"]:
         raise SafetyError("HID report capability mismatch")
-    sid=target["stable_instance_id"].replace("'","''")
-    script=(f"$d=Get-PnpDevice -InstanceId '{sid}' -ErrorAction Stop;$p=Get-PnpDeviceProperty -InstanceId '{sid}';"
-            "$o=[ordered]@{status=$d.Status;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data;"
-            "location=(($p|? KeyName -eq 'DEVPKEY_Device_LocationPaths').Data -join '|')};$o|ConvertTo-Json -Compress")
-    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
-    if cp.returncode:raise DeviceDisconnected("PID 5302 stable parent is not present")
-    pnp=json.loads(cp.stdout)
-    if pnp.get("status")!="OK" or str(pnp.get("container_id","")).lower()!=target["container_id"].lower():
-        raise SafetyError("PID 5302 stable identity/container mismatch")
+    pnp=snapshot.exact(target["stable_instance_id"])
+    if pnp.status!="OK" or pnp.container_id.casefold()!=target["container_id"].casefold():raise SafetyError("PID 5302 stable identity/container mismatch")
     if info.path.lower()!=target["confirmed_device_path"].lower():raise SafetyError("PID 5302 HID path changed")
-    return DeviceIdentity(target["vid_pid"],target["stable_instance_id"],pnp["container_id"],target["interface"],
-                          target["endpoint"],target["response_endpoint"],target["transfer_type"],"HIDUSB",
-                          f"{pnp['container_id']}|{pnp.get('location')}|{info.path}",info.path,target["host_payload_size"])
+    return DeviceIdentity(target["vid_pid"],target["stable_instance_id"],pnp.container_id,target["interface"],target["endpoint"],target["response_endpoint"],target["transfer_type"],"HIDUSB",f"{pnp.container_id}|{pnp.location}|{info.path}",info.path,target["host_payload_size"])
 
-def materialize_reviewed_hid_target(definition:dict,api=None)->dict:
+def materialize_reviewed_hid_target(definition:dict,api=None,snapshot=None)->dict:
     """Bind the reviewed 5302 definition to one exact MI_00 HID interface."""
     if definition.get("vid_pid")!="0416:5302":raise SafetyError("unsupported reviewed HID definition")
+    if snapshot is None:
+        from .windows_metadata import collect_windows_metadata_snapshot
+        snapshot=collect_windows_metadata_snapshot()
     info=discover_5302(api)
     if info.input_report_bytes!=definition["hid_input_report_bytes"] or info.output_report_bytes!=definition["hid_output_report_bytes"]:raise SafetyError("PID 5302 HID report capability mismatch")
-    script=("$ds=@(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^USB\\\\VID_0416&PID_5302\\\\' });"
-            "$items=@();foreach($d in $ds){$p=Get-PnpDeviceProperty -InstanceId $d.InstanceId;"
-            "$items+=@([ordered]@{status=$d.Status;instance_id=$d.InstanceId;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data})};"
-            "[ordered]@{count=$items.Count;items=$items}|ConvertTo-Json -Compress -Depth 4")
-    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
-    if cp.returncode:raise DeviceDisconnected("reviewed PID 5302 parent is not present")
-    result=json.loads(cp.stdout);items=result.get("items") or []
-    if isinstance(items,dict):items=[items]
-    if result.get("count")!=1:raise SafetyError(f"expected one reviewed PID 5302 parent, found {result.get('count',0)}")
+    items=snapshot.physical_roots("0416:5302")
+    if len(items)!=1:raise SafetyError(f"expected one reviewed PID 5302 parent, found {len(items)}")
     item=items[0]
-    if item.get("status")!="OK":raise SafetyError("PID 5302 parent status is not OK")
-    target=deepcopy(definition);target.update(stable_instance_id=item["instance_id"],interface_instance_id=item["instance_id"],container_id=str(item.get("container_id") or ""),confirmed_device_path=info.path)
+    if item.status!="OK":raise SafetyError("PID 5302 parent status is not OK")
+    target=deepcopy(definition);target.update(stable_instance_id=item.instance_id,interface_instance_id=item.instance_id,container_id=item.container_id,confirmed_device_path=info.path)
     if not target["container_id"]:raise SafetyError("PID 5302 container identity is unavailable")
-    actual=discover_hid_identity(target,api);validate_identity(actual,expected_identity(target));return target
+    actual=discover_hid_identity(target,api,snapshot);validate_identity(actual,expected_identity(target));return target
+
+
+def reviewed_reference_hid_connection(target:dict,api=None,snapshot=None):
+    """Probe one materialized reviewed 5302 identity through its existing path."""
+    from .devices.thermalright_reference import ReferencePanelConnection
+    if target.get("vid_pid")!="0416:5302":raise SafetyError("shared reviewed HID probing is limited to PID 5302")
+    api=api or CtypesWindowsHidApi()
+    # CtypesWindowsHidApi owns report I/O only. Path enumeration/capability
+    # inspection uses the module-level HID discovery implementation.
+    identity=(lambda:discover_hid_identity(target,snapshot=snapshot)) if snapshot is not None else (lambda:discover_hid_identity(target))
+    transport=RealHidTransport(target,identity,api,4096,512*1024*1024)
+    return ReferencePanelConnection(target["vid_pid"],"hid",transport,target["endpoint"],target["response_endpoint"])
 
 def read_only_hid_capture_probe(vid:int,pid:int,timeout_ms:int=100)->dict:
     """Post input-only HID requests; never obtains output access."""

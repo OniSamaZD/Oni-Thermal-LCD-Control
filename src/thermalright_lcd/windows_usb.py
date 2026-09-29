@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import ctypes
 from copy import deepcopy
-import json
-import subprocess
-from .subprocess_utils import hidden_subprocess_kwargs
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Protocol
@@ -117,43 +114,34 @@ class CtypesWinUsbApi:
         self._file_handle=None
 
 
-def discover_identity(target: dict) -> DeviceIdentity:
+def discover_identity(target: dict, snapshot=None) -> DeviceIdentity:
     """Fresh read-only PnP discovery; never trusts a transient USB bus address."""
-    sid=target["stable_instance_id"].replace("'","''"); iid=target["interface_instance_id"].replace("'","''")
-    script=(f"$d=Get-PnpDevice -InstanceId '{sid}' -ErrorAction Stop; "
-            f"$p=Get-PnpDeviceProperty -InstanceId '{sid}'; $ip=Get-PnpDeviceProperty -InstanceId '{iid}'; "
-            "$o=[ordered]@{status=$d.Status;instance_id=$d.InstanceId;"
-            "container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data;"
-            "service=($ip|? KeyName -eq 'DEVPKEY_Device_Service').Data;"
-            "location=(($p|? KeyName -eq 'DEVPKEY_Device_LocationPaths').Data -join '|')};$o|ConvertTo-Json -Compress")
-    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
-    if cp.returncode: raise DeviceDisconnected("allowlisted PnP identity not present")
-    d=json.loads(cp.stdout)
-    if d["status"]!="OK": raise DeviceDisconnected("device status is not OK")
-    generation=f"{d.get('container_id')}|{d.get('location')}"
-    return DeviceIdentity(target["vid_pid"],d["instance_id"],d.get("container_id"),target["interface"],
+    if snapshot is None:
+        from .windows_metadata import collect_windows_metadata_snapshot
+        snapshot=collect_windows_metadata_snapshot()
+    sid=target["stable_instance_id"]
+    d=snapshot.exact(sid)
+    if d.status!="OK":raise DeviceDisconnected("device status is not OK")
+    generation=f"{d.container_id}|{d.location}"
+    return DeviceIdentity(target["vid_pid"],d.instance_id,d.container_id,target["interface"],
                           target["endpoint"],target["response_endpoint"],target["transfer_type"],
-                          d.get("service") or "",generation,target.get("confirmed_device_path"),target["host_payload_size"])
+                          d.service,generation,target.get("confirmed_device_path"),target["host_payload_size"])
 
 
-def materialize_reviewed_winusb_target(definition: dict) -> dict:
+def materialize_reviewed_winusb_target(definition: dict, snapshot=None) -> dict:
     """Bind the reviewed 5408 definition to exactly one present WinUSB LCD."""
     if definition.get("vid_pid") != "0416:5408":raise SafetyError("unsupported reviewed WinUSB definition")
-    script=("$ds=@(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^USB\\\\VID_0416&PID_5408\\\\' });"
-            "$items=@();foreach($d in $ds){$p=Get-PnpDeviceProperty -InstanceId $d.InstanceId;"
-            "$items+=@([ordered]@{status=$d.Status;instance_id=$d.InstanceId;container_id=($p|? KeyName -eq 'DEVPKEY_Device_ContainerId').Data;service=($p|? KeyName -eq 'DEVPKEY_Device_Service').Data})};"
-            "[ordered]@{count=$items.Count;items=$items}|ConvertTo-Json -Compress -Depth 4")
-    cp=subprocess.run(["powershell","-NoProfile","-Command",script],capture_output=True,text=True,timeout=5,**hidden_subprocess_kwargs())
-    if cp.returncode:raise DeviceDisconnected("reviewed PID 5408 is not present")
-    result=json.loads(cp.stdout);items=result.get("items") or []
-    if isinstance(items,dict):items=[items]
-    if result.get("count")!=1:raise SafetyError(f"expected one reviewed PID 5408 device, found {result.get('count',0)}")
+    if snapshot is None:
+        from .windows_metadata import collect_windows_metadata_snapshot
+        snapshot=collect_windows_metadata_snapshot()
+    items=snapshot.physical_roots("0416:5408")
+    if len(items)!=1:raise SafetyError(f"expected one reviewed PID 5408 device, found {len(items)}")
     item=items[0]
-    if item.get("status")!="OK" or str(item.get("service","")).upper()!="WINUSB":raise SafetyError("PID 5408 requires an OK WinUSB device")
-    target=deepcopy(definition);sid=item["instance_id"];guid=target["interface_guid"]
-    target.update(stable_instance_id=sid,interface_instance_id=sid,container_id=str(item.get("container_id") or ""),confirmed_device_path="\\\\?\\"+sid.replace("\\","#")+"#"+guid)
+    if item.status!="OK" or item.service.upper()!="WINUSB":raise SafetyError("PID 5408 requires an OK WinUSB device")
+    target=deepcopy(definition);sid=item.instance_id;guid=target["interface_guid"]
+    target.update(stable_instance_id=sid,interface_instance_id=sid,container_id=item.container_id,confirmed_device_path="\\\\?\\"+sid.replace("\\","#")+"#"+guid)
     if not target["container_id"] or not device_path_registered(target):raise SafetyError("PID 5408 reviewed interface path is not registered")
-    actual=discover_identity(target);validate_identity(actual,expected_identity(target));return target
+    actual=discover_identity(target,snapshot=snapshot);validate_identity(actual,expected_identity(target));return target
 
 
 def device_path_registered(target: dict) -> bool:
@@ -228,3 +216,13 @@ def reference_winusb_connection(candidate, api=None):
     identity=lambda:discover_identity(target)
     transport=RealUsbTransport(target,identity,api,4096,512*1024*1024)
     return ReferencePanelConnection(candidate.vid_pid,"winusb",transport,target["endpoint"],target["response_endpoint"])
+
+
+def reviewed_reference_winusb_connection(target: dict, api=None, snapshot=None):
+    """Probe one materialized reviewed 5408 identity through its existing path."""
+    from .devices.thermalright_reference import ReferencePanelConnection
+    if target.get("vid_pid") != "0416:5408":
+        raise SafetyError("shared reviewed WinUSB probing is limited to PID 5408")
+    api=api or CtypesWinUsbApi();identity=(lambda:discover_identity(target,snapshot=snapshot)) if snapshot is not None else (lambda:discover_identity(target))
+    transport=RealUsbTransport(target,identity,api,4096,512*1024*1024)
+    return ReferencePanelConnection(target["vid_pid"],"winusb",transport,target["endpoint"],target["response_endpoint"])

@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 from PySide6.QtWidgets import QApplication
 
 from thermalright_lcd.gui import MainWindow
-from thermalright_lcd.hardware_monitor import templates
+from thermalright_lcd.hardware_monitor import MonitorElement, MonitorLayout
 from thermalright_lcd.output_mode import OutputMode
 
 
@@ -29,6 +29,14 @@ def pump_until(app, predicate, timeout):
         if predicate():return True
         time.sleep(.01)
     return bool(predicate())
+
+
+def benchmark_layout(device_id):
+    width, height = ((1920, 462) if device_id == "0416:5408" else (1280, 480))
+    return MonitorLayout("Lifecycle overlay", device_id, width, height,
+                         background_source="current_media",
+                         elements=[MonitorElement("label + value", 30, 24, 330, 78,
+                                                  text="CPU", sensor_id="cpu.usage", suffix="%")])
 
 
 def snapshot(card):
@@ -65,12 +73,16 @@ def main():
         for card in cards:
             card.pan_x_box.setValue(80);card.pan_y_box.setValue(-30);card.zoom_box.setValue(1.2);card.rotation.setCurrentIndex(1);card.mode.setCurrentText("Fill");card.brightness_slider.setValue(82)
         pump(app,2)
-        for card in cards:window.start_monitor_overlay(card.device_id,templates(card.device_id)["Gaming Dashboard"])
+        for card in cards:window.start_monitor_overlay(card.device_id, benchmark_layout(card.device_id))
         pump(app,2)
         for card in cards:
-            card.quick_edit.setChecked(True);editor=card.home_quick_editor;element=editor.layout.elements[0];editor.scene.controller.select([element.id]);editor.scene.controller.move(20,10);editor.changed.emit()
+            editor=card.home_quick_editor
+            if editor is not None:
+                card.quick_edit.setChecked(True);element=editor.layout.elements[0];editor.scene.controller.select([element.id]);editor.scene.controller.move(20,10);editor.changed.emit()
         pump(app,2);after={c.device_id:snapshot(c) for c in cards};results["photo"]={pid:{"delta":delta(before[pid],after[pid]),"scheduler_unchanged":scheduler_ids[pid]==(id(card.scheduler) if card.scheduler else None)} for pid,card in ((c.device_id,c) for c in cards)}
-        for card in cards:card.quick_edit.setChecked(False);card.stop(coordinated=True);window.set_output_mode(card.device_id,OutputMode.MEDIA,False)
+        for card in cards:
+            if card.home_quick_editor is not None:card.quick_edit.setChecked(False)
+            card.stop(coordinated=True);window.set_output_mode(card.device_id,OutputMode.MEDIA,False)
         # Video: one shared decoder, no restart while every live transform is changed.
         for card in cards:card.load(args.video);card.fps.setCurrentText("60")
         pre_open={c.device_id:c.session.metrics.sent for c in cards};window.sync_toggle.setChecked(True);window.left.play()

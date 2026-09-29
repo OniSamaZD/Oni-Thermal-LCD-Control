@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 import unittest
+from unittest.mock import patch
 from PIL import Image
 
 from thermalright_lcd.devices.thermalright_reference import (
@@ -25,11 +26,28 @@ class ThermalrightReferenceTests(unittest.TestCase):
         response[5]=0xFF;self.assertIsNone(detect_model("0416:5302","hid",bytes(response)))
         self.assertIsNone(detect_model("0416:5302","winusb",bytes(response)))
 
+    def test_trofeo_hid_probe_reads_protocol_bytes_without_report_id(self):
+        class Transport:
+            def __init__(self):self.read_length=None
+            def open(self,_):pass
+            def write(self,_endpoint,data,_timeout):return len(data)
+            def read(self,_endpoint,length,_timeout):
+                self.read_length=length;response=bytearray(length);response[:4]=b"\xda\xdb\xdc\xdd";response[5]=0x80;return bytes(response)
+            def close(self,_):pass
+        transport=Transport();connection=ReferencePanelConnection("0416:5302","hid",transport,"0x02","0x83")
+        self.assertEqual(connection.open().key,"trofeo-vision-686");self.assertEqual(transport.read_length,36);connection.close()
+
     def test_trofeo_bulk_variants(self):
         for marker,key in ((1,"trofeo-vision-916"),(2,"trofeo-vision-916-v2"),(3,"trofeo-vision-916-v2"),(5,"trofeo-vision-113")):
             response=bytearray(512);response[:2]=b"\x03\xff";response[8]=1;response[20]=marker
             self.assertEqual(detect_model("0416:5408","winusb",bytes(response)).key,key)
         response[20]=9;self.assertIsNone(detect_model("0416:5408","winusb",bytes(response)))
+
+    def test_captured_verified_hardware_responses_resolve_to_reviewed_models(self):
+        hid=bytes.fromhex("dadbdcdd018000000000000001000000100000004150345331323212004dd04807323e78")
+        bulk=bytearray(512);bulk[:64]=bytes.fromhex("03ff00000000000001000000000000000ed6439f0100020080070000e00100003200000000000000000000001200000000000000000000000000000000000000")
+        self.assertEqual(detect_model("0416:5302","hid",hid).key,"trofeo-vision-686")
+        self.assertEqual(detect_model("0416:5408","winusb",bytes(bulk)).key,"trofeo-vision-916")
 
     def test_chizhu_pm_sub_identifier_and_booting(self):
         response=bytearray(1024);response[4:12]=b"SSCRM-V3";response[24]=4;response[28]=2
@@ -125,6 +143,74 @@ class ThermalrightReferenceTests(unittest.TestCase):
             def close_handle(self,h):pass
         c=ConnectedPanelCandidate("USB\\VID_0416&PID_5409\\REAL","0416:5409","WinUSB","connected","container","{guid}","\\\\?\\usb#real#{guid}")
         connection=reference_winusb_connection(c,Api());self.assertEqual(connection.out_endpoint,"0x02");self.assertEqual(connection.in_endpoint,"0x81")
+
+    def test_shared_reviewed_models_resolve_once_and_keep_verified_contracts(self):
+        from thermalright_lcd.device_discovery import resolve_shared_reviewed_target
+        from thermalright_lcd.devices.registry import DEVICES
+        class Connection:
+            def __init__(self,model):self.model=model;self.closed=0
+            def open(self):return self.model
+            def close(self):self.closed+=1
+        cases=(("0416:5408","trofeo-vision-916",(1920,462)),("0416:5302","trofeo-vision-686",(1280,480)))
+        for device_id,key,size in cases:
+            made=[]
+            def factory(_target,key=key):
+                value=Connection(MODELS[key]);made.append(value);return value
+            found=resolve_shared_reviewed_target(device_id,{"stable_instance_id":f"physical-{device_id}"},factory)
+            self.assertEqual(found.device_id,device_id);self.assertEqual(found.stable_id,f"physical-{device_id}")
+            self.assertEqual(DEVICES[device_id].encoded_size,size);self.assertEqual(len(made),1);self.assertEqual(made[0].closed,1)
+
+    def test_shared_reviewed_variant_cannot_also_take_reviewed_fallback(self):
+        from thermalright_lcd.device_discovery import resolve_shared_reviewed_target
+        from thermalright_lcd.reference_runtime import reference_binding,remove_reference_binding
+        class Connection:
+            def __init__(self,model):self.model=model
+            def open(self):return self.model
+            def close(self):pass
+            def __call__(self,frame):return frame.total_bytes
+        made=[]
+        def factory(_target):
+            value=Connection(MODELS["trofeo-vision-113"]);made.append(value);return value
+        found=resolve_shared_reviewed_target("0416:5408",{"stable_instance_id":"one-physical-5408"},factory)
+        try:
+            self.assertNotEqual(found.device_id,"0416:5408");self.assertTrue(found.device_id.startswith("thermalright-ref:trofeo-vision-113:"))
+            self.assertEqual(found.definition.encoded_size,(1920,400));self.assertEqual(reference_binding(found.device_id).stable_id,"one-physical-5408")
+        finally:remove_reference_binding(found.device_id)
+
+    def test_shared_5302_variant_gets_dynamic_geometry_and_one_session(self):
+        from thermalright_lcd.device_discovery import DisplayLifecycle,resolve_shared_reviewed_target
+        from thermalright_lcd.reference_runtime import remove_reference_binding
+        from thermalright_lcd.runtime import DisplaySession
+        class Connection:
+            def open(self):return MODELS["trofeo-vision-320"]
+            def close(self):pass
+            def __call__(self,frame):return frame.total_bytes
+        found=resolve_shared_reviewed_target("0416:5302",{"stable_instance_id":"one-physical-5302"},lambda _:Connection())
+        created=[]
+        lifecycle=DisplayLifecycle(lambda observation:created.append(observation.device_id) or DisplaySession(observation.device_id,Connection(),refresh_interval=.1),lambda session:session.stop())
+        try:
+            self.assertEqual(found.definition.encoded_size,(320,320));self.assertTrue(found.definition.full_frame_jpeg_required is False)
+            lifecycle.reconcile((found,found));self.assertEqual(created,[found.device_id]);self.assertEqual(len(lifecycle.runtimes),1)
+        finally:lifecycle.clear();remove_reference_binding(found.device_id)
+
+    def test_shared_reviewed_ambiguous_probe_fails_closed(self):
+        from thermalright_lcd.device_discovery import resolve_shared_reviewed_target
+        class Connection:
+            def open(self):raise RuntimeError("unknown PM/SUB")
+            def close(self):pass
+        with self.assertRaisesRegex(RuntimeError,"unknown PM/SUB"):
+            resolve_shared_reviewed_target("0416:5302",{"stable_instance_id":"ambiguous"},lambda _:Connection())
+
+    def test_reviewed_hid_probe_keeps_io_api_out_of_path_enumeration(self):
+        from thermalright_lcd.live_state import DeviceIdentity
+        from thermalright_lcd.windows_hid import reviewed_reference_hid_connection
+        target={"vid_pid":"0416:5302","endpoint":"0x02","response_endpoint":"0x83"}
+        identity=DeviceIdentity("0416:5302","stable","container",1,"0x02","0x83","interrupt","HIDUSB","generation","\\\\?\\HID#VID_0416&PID_5302&MI_00#real",512)
+        io_api=object()
+        with patch("thermalright_lcd.windows_hid.discover_hid_identity",return_value=identity) as discover:
+            connection=reviewed_reference_hid_connection(target,io_api)
+            self.assertIs(connection.transport.discover(),identity)
+        discover.assert_called_once_with(target)
 
 
 if __name__ == "__main__":

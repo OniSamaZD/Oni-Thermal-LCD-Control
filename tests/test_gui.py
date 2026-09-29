@@ -113,6 +113,34 @@ class GuiTests(unittest.TestCase):
             window=MainWindow();self.assertEqual(window.sidebar.width(),306);self.assertTrue(all(button.artwork_loaded and not button._icon_art.isNull() for button in window.nav.values()));window.set_sidebar_expanded(False);self.assertEqual(window.sidebar.width(),68);window.shutdown()
             restored=MainWindow();self.assertFalse(restored.settings.sidebar_expanded);self.assertEqual(restored.sidebar.width(),68);self.assertEqual(restored.nav["Hardware Monitor"].toolTip(),"Hardware Monitor");restored.shutdown()
 
+    def test_side_by_side_cards_and_previews_stay_inside_workspace_at_supported_sizes(self):
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):
+            window=MainWindow();window.show();self.app.processEvents();window.open_display_workspace();window.set_display_layout("side_by_side");window.resize(1920,1080);QTest.qWait(80)
+            for width,height in ((1920,1080),(1600,900),(1366,768),(1280,800)):
+                window.resize(width,height);QTest.qWait(80);self.app.processEvents()
+                self.assertEqual(window.display_workspace_page.horizontalScrollBar().maximum(),0)
+                first,second=window.cards;available=window.display_splitter.width()-window.display_splitter.handleWidth();expected=available/2
+                self.assertLess(first.geometry().right(),second.geometry().left());self.assertLessEqual(second.geometry().right(),window.display_splitter.contentsRect().right())
+                self.assertGreaterEqual(first.width(),int(expected*.90));self.assertGreaterEqual(second.width(),int(expected*.90));self.assertLessEqual(abs(first.width()-second.width()),max(2,int(available*.02)))
+                for card in window.cards:
+                    self.assertLessEqual(card.preview.width(),card.width());self.assertLessEqual(card.preview.height(),card.height())
+                    self.assertLessEqual(card.preview.geometry().right(),card.preview_column.contentsRect().right())
+                    self.assertAlmostEqual(card.preview.width()/card.preview.height(),card.size_target[0]/card.size_target[1],delta=.04)
+            window.set_display_layout("stacked");QTest.qWait(80);first,second=window.cards;self.assertEqual(window.display_splitter.orientation(),Qt.Vertical);self.assertLess(first.geometry().bottom(),second.geometry().top());window.shutdown()
+
+    def test_collapsed_home_connected_display_manage_controls_remain_readable(self):
+        from PySide6.QtWidgets import QPushButton
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):
+            window=MainWindow();window.show();window.select_page(0,open_dialog=False);window.set_sidebar_expanded(False,save=False)
+            for width,height in ((1920,1080),(1600,900),(1366,768),(1280,800)):
+                window.resize(width,height);QTest.qWait(50)
+                buttons=[button for button in window.home_page.displays_host.findChildren(QPushButton) if button.text()=="Manage"]
+                self.assertEqual(len(buttons),2)
+                for button in buttons:
+                    self.assertGreaterEqual(button.width(),button.sizeHint().width())
+                    rect=button.geometry();parent=button.parentWidget().contentsRect();self.assertTrue(parent.contains(rect.topLeft()));self.assertTrue(parent.contains(rect.bottomRight()))
+            window.shutdown()
+
     def test_home_navigation_and_empty_state_artwork_loads(self):
         with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{"LOCALAPPDATA":d}),patch("thermalright_lcd.gui.build_gui_sender",side_effect=lambda _:DisabledHardwareSender()):
             window=MainWindow()

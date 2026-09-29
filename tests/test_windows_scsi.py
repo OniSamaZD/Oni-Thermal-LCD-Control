@@ -3,8 +3,17 @@ from thermalright_lcd.devices.thermalright_reference import MODELS
 from thermalright_lcd.encoder import encode_reference
 
 def test_scsi_enumeration_requires_real_path_vid_pid_and_usblcd_model():
-    class Result:returncode=0;stdout='[{"path":"\\\\.\\\\PhysicalDrive3","pnp":"USB\\\\VID_0402&PID_3922\\\\A","model":"USBLCD Panel","status":"OK"},{"path":"\\\\.\\\\PhysicalDrive4","pnp":"USB\\\\VID_0402&PID_3922\\\\B","model":"Disk","status":"OK"}]'
-    assert enumerate_scsi_candidates(lambda *a,**k:Result())==(("\\.\\PhysicalDrive3","0402:3922"),)
+    class Api:
+        def enumerate_disk_interfaces(self):return ({"path":"\\.\\PhysicalDrive3","pnp":"USB\\VID_0402&PID_3922\\A","model":"USBLCD Panel","status":"OK"},{"path":"\\.\\PhysicalDrive4","pnp":"USB\\VID_0402&PID_3922\\B","model":"Disk","status":"OK"})
+    assert enumerate_scsi_candidates(Api())==(("\\.\\PhysicalDrive3","0402:3922"),)
+
+def test_native_scsi_enumeration_preserves_filtering_and_physical_drive_path():
+    class Api:
+        def enumerate_disk_interfaces(self):return (
+            {"path":r"\\.\PhysicalDrive3","pnp":r"USB\VID_0402&PID_3922\A","model":"USBLCD Panel","status":"OK"},
+            {"path":r"\\.\PhysicalDrive4","pnp":r"USB\VID_0402&PID_3922\B","model":"Disk","status":"OK"},
+            {"path":r"\\.\PhysicalDrive5","pnp":r"USB\VID_0416&PID_5406\C","model":"USBLCD Panel","status":"Error"})
+    assert enumerate_scsi_candidates(Api())==((r"\\.\PhysicalDrive3","0402:3922"),)
 
 def test_scsi_connection_poll_init_frame_and_cleanup():
     class Api:

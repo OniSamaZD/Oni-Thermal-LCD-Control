@@ -29,8 +29,12 @@ class PackagingTests(unittest.TestCase):
     def test_version_metadata_matches_project(self):
         metadata = (ROOT / "packaging/version_info.txt").read_text(encoding="utf-8")
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('version = "0.1.0"', project)
-        self.assertIn("StringStruct(u'ProductVersion', u'0.1.0')", metadata)
+        runtime = (ROOT / "src/thermalright_lcd/gui.py").read_text(encoding="utf-8")
+        package = (ROOT / "src/thermalright_lcd/__init__.py").read_text(encoding="utf-8")
+        self.assertIn('version = "0.1.1"', project)
+        self.assertIn("StringStruct(u'ProductVersion', u'0.1.1')", metadata)
+        self.assertIn('setApplicationVersion("0.1.1")', runtime)
+        self.assertIn('__version__ = "0.1.1"', package)
         self.assertIn("Oni Thermal LCD Control.exe", metadata)
 
     def test_build_clean_is_scoped_to_repository(self):

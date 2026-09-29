@@ -18,7 +18,7 @@ def test_catalog_search_and_truthful_status_categories():
     all_rows = [dialog.models.item(i).text() for i in range(dialog.models.count())]
     assert any("Trofeo Vision 9.16" in row and "Verified" in row for row in all_rows)
     assert any("BeadaPanel" in row and "Experimental" in row for row in all_rows)
-    assert any("Jonsbo DS339" in row and "Unsupported / Incomplete" in row for row in all_rows)
+    assert any("Jonsbo DS339" in row and "Experimental" in row for row in all_rows)
     assert all("Detection Only" not in row for row in all_rows)
     dialog.search.setText("DS916")
     assert dialog.models.count() == 1
@@ -52,5 +52,8 @@ def test_experimental_means_runtime_output_enabled_and_incomplete_stays_closed()
         assert any(expected in item.model and item.status=="Experimental" for item in rows)
     incomplete=[item for item in rows if item.status=="Unsupported / Incomplete"]
     assert incomplete and all(not item.output_enabled for item in incomplete)
-    assert any("Jonsbo DS339" in item.model for item in incomplete)
+    assert any("Jonsbo DS339" in item.model and item.output_enabled for item in experimental)
     assert not any("Detection Only" in item.status for item in rows)
+    for key in ("trofeo-vision-916-v2","trofeo-vision-113","frozen-warframe-se","trofeo-vision-320"):
+        item=next(row for row in rows if row.key==key)
+        assert item.status=="Experimental" and item.output_enabled

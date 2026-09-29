@@ -12,13 +12,16 @@ htmlcov/
 build/
 dist/
 dist-installer/
+release/
 *.spec.bak
 
 # Local test and scratch output
 .test-*/
+.tmp-*/
 temp/
 scratch_appdata/
 logs/
+*.tmp
 *.log
 *.bak
 *.before_*

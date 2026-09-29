@@ -37,5 +37,18 @@ class PerformanceTests(unittest.TestCase):
             # not a leak or failure.
             self.assertLessEqual(data["post_cleanup_threads"], data["threads"]["start"])
 
+    def test_video_profile_uses_the_native_bgr_production_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/"profile.json"
+            result = subprocess.run([
+                sys.executable, "-m", "thermalright_lcd.performance", "--worker", "static_video",
+                "--duration", ".35", "--interval", ".05", "--output", str(output)],
+                text=True, capture_output=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(output.read_text(encoding="utf-8"))
+            self.assertGreater(data["native_bgr_prepares"], 0)
+            self.assertEqual(data["pillow_prepares"], 0)
+            self.assertEqual(data["usb_writes"], 0)
+
 
 if __name__ == "__main__": unittest.main()

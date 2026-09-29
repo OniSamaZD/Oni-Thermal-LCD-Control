@@ -74,10 +74,18 @@ class _SyntheticSource:
         self.index = 0
         self.closed = False
     def next_frame(self):
-        from PIL import Image, ImageDraw
         from .playback import MediaFrame
         i = self.index
         base = (i * 11 % 255, i * 23 % 255, i * 37 % 255)
+        if self.kind == "video":
+            import numpy as np
+            bgr = np.empty((self.size[1], self.size[0], 3), dtype=np.uint8)
+            bgr[:] = base[::-1]
+            left = i % max(1, self.size[0]-80)
+            bgr[10:75, left:left+65] = 255
+            self.index += 1
+            return MediaFrame(None, 1/self.fps, i, i/self.fps, bgr)
+        from PIL import Image, ImageDraw
         image = Image.new("RGB", self.size, base)
         ImageDraw.Draw(image).rectangle((i % max(1, self.size[0]-80), 10,
                                          i % max(1, self.size[0]-80)+64, 74), fill="white")
@@ -98,6 +106,8 @@ class _Workload:
         self._next_overlay = 0.0
         self.gui_shell_fallback = ""
         self.requested_fps = []
+        self.native_bgr_prepares = 0
+        self.pillow_prepares = 0
 
     def start(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -157,8 +167,15 @@ class _Workload:
         session = DisplaySession(name, sender, refresh_interval=1/fps)
         session.play()
         def deliver(media_frame):
-            _prepared, encoded = pipe.prepare_image(media_frame.image, vid_pid)
-            session.submit(encoded)
+            if media_frame.native_bgr is not None:
+                prepared, encoded = pipe.prepare_bgr(media_frame.native_bgr, vid_pid, generate_preview=False)
+                self.native_bgr_prepares += 1
+            else:
+                prepared, encoded = pipe.prepare_image(media_frame.image, vid_pid)
+                self.pillow_prepares += 1
+            try: session.submit(encoded)
+            finally:
+                if prepared.canvas is not None: prepared.canvas.close()
         scheduler = FrameScheduler(source, deliver, target_fps=fps)
         scheduler.start()
         self.requested_fps.append(fps)
@@ -203,6 +220,8 @@ class _Workload:
             "usb_open_calls": 0,
             "usb_writes": 0,
             "sink_calls": sum(x.calls for x in self.senders),
+            "native_bgr_prepares": self.native_bgr_prepares,
+            "pillow_prepares": self.pillow_prepares,
             "gui_shell_fallback": self.gui_shell_fallback or None,
         }
 

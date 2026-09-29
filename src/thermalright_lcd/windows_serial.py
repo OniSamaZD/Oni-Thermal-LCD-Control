@@ -22,7 +22,7 @@ def enumerate_serial_candidates(registry=None) -> tuple[SerialCandidate,...]:
                 family=winreg.EnumKey(usb,i);match=re.fullmatch(r"VID_([0-9A-F]{4})&PID_([0-9A-F]{4})",family,re.I)
                 if not match:continue
                 vid_pid=f"{match.group(1)}:{match.group(2)}".lower()
-                if vid_pid not in {"33c3:7788","33c3:f101"}:continue
+                if vid_pid not in {"33c3:7788","33c3:f101","1a86:5722"}:continue
                 with winreg.OpenKey(usb,family) as devices:
                     for j in range(winreg.QueryInfoKey(devices)[0]):
                         instance=winreg.EnumKey(devices,j)
@@ -34,8 +34,8 @@ def enumerate_serial_candidates(registry=None) -> tuple[SerialCandidate,...]:
     return tuple(found)
 
 class PySerialIo:
-    def __init__(self,port:str,baud:int,*,timeout:float=2.0,open_delay:float=0.0,serial_factory=None):
-        self.port=port;self.baud=baud;self.timeout=timeout;self.open_delay=open_delay;self.factory=serial_factory;self.handle=None
+    def __init__(self,port:str,baud:int,*,timeout:float=2.0,open_delay:float=0.0,rtscts:bool=False,serial_factory=None):
+        self.port=port;self.baud=baud;self.timeout=timeout;self.open_delay=open_delay;self.rtscts=rtscts;self.factory=serial_factory;self.handle=None
     def open(self):
         if self.handle is not None:return
         try:
@@ -43,7 +43,7 @@ class PySerialIo:
             if factory is None:
                 import serial
                 factory=serial.Serial
-            self.handle=factory(self.port,self.baud,timeout=self.timeout,write_timeout=5,dsrdtr=False,rtscts=False)
+            self.handle=factory(self.port,self.baud,timeout=self.timeout,write_timeout=120,dsrdtr=False,rtscts=self.rtscts)
             self.handle.dtr=True;self.handle.rts=True
             if self.open_delay:
                 import time;time.sleep(self.open_delay)

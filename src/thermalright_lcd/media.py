@@ -102,8 +102,12 @@ class MediaPipeline:
         if device_id.startswith("community-ref:"):
             from .devices.community_panels import encode_community
             if model.pixel_format=="jpeg":return encode_community(model,jpeg=prepared.jpeg)
+            if model.pixel_format=="bgr888":
+                import numpy as np
+                rgb=np.asarray(prepared.canvas.convert("RGB"));return encode_community(model,pixels=np.ascontiguousarray(rgb[:,:,::-1]).tobytes())
             from .devices.beadapanel_protocol import encode_rgb565
-            return encode_community(model,pixels=encode_rgb565(prepared.canvas,model.render_size,order="BGR"))
+            order="RGB" if model.pixel_format=="rgb565-rgb-le" else "BGR"
+            return encode_community(model,pixels=encode_rgb565(prepared.canvas,model.render_size,order=order))
         if model.pixel_format=="jpeg":return encode_reference(model,jpeg=prepared.jpeg)
         order="big" if model.pixel_format.endswith("be") else "little"
         return encode_reference(model,rgb565=image_to_rgb565(prepared.canvas,order))
@@ -197,9 +201,10 @@ class MediaPipeline:
             if vid_pid.startswith("community-ref:"):
                 from .devices.community_panels import encode_community
                 if model.pixel_format=="jpeg":encoded=encode_community(model,jpeg=jpeg_bytes)
+                elif model.pixel_format=="bgr888":encoded=encode_community(model,pixels=np.ascontiguousarray(out).tobytes())
                 else:
                     from .devices.beadapanel_protocol import encode_rgb565
-                    pil=Image.fromarray(cv2.cvtColor(out,cv2.COLOR_BGR2RGB));encoded=encode_community(model,pixels=encode_rgb565(pil,model.render_size,order="BGR"));pil.close()
+                    pil=Image.fromarray(cv2.cvtColor(out,cv2.COLOR_BGR2RGB));order="RGB" if model.pixel_format=="rgb565-rgb-le" else "BGR";encoded=encode_community(model,pixels=encode_rgb565(pil,model.render_size,order=order));pil.close()
             elif model.pixel_format=="jpeg":encoded=encode_reference(model,jpeg=jpeg_bytes)
             else:
                 pil=Image.fromarray(cv2.cvtColor(out,cv2.COLOR_BGR2RGB));encoded=encode_reference(model,rgb565=image_to_rgb565(pil,"big" if model.pixel_format.endswith("be") else "little"));pil.close()
