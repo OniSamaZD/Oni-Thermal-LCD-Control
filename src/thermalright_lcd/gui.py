@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
 from .media import cache_overlay, render_static, render_image, FitMode, MediaPipeline, QUALITY_PROFILES
 from .playback import open_frame_source, FrameScheduler, SharedFrameScheduler
 from .settings import SettingsStore, AppSettings, DisplayProfile
+from .interaction_effects import apply_interaction_effects
 from .conflicts import thermalright_processes
 from .runtime import DisplaySession, SessionState
 from .output_rate import RATE_LABELS, resolve_output_rate
@@ -1245,7 +1246,7 @@ class DisplayCard(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self, discovery_provider=None, startup_discovery=None):
         super().__init__(); self.setWindowTitle("Oni Thermal LCD Control"); self.resize(1440, 860); self.setMinimumSize(820, 560)
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OniThermalLcd"; self.base = base; self.store = SettingsStore(base / "settings.json"); self.settings = self.store.load(); self.startup = StartupManager()
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OniThermalLcd"; self.base = base; self.store = SettingsStore(base / "settings.json"); self.settings = self.store.load(); self.startup = StartupManager(); self.set_effects_enabled(self.settings.effects_enabled, persist=False)
         
         root = AtmosphericShell(); root.setObjectName("appShell"); self.setCentralWidget(root); shell = QHBoxLayout(root); shell.setContentsMargins(0, 0, 0, 0); shell.setSpacing(0)
         
@@ -1434,6 +1435,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0,self.restore_desired_outputs)
 
     def _media_dialog_directory(self): return media_dialog_start_directory(self.settings.last_media_directory, self.base / "media")
+    def set_effects_enabled(self, enabled, *, persist=False):
+        self.settings.effects_enabled=bool(enabled);app=QApplication.instance()
+        if app is not None and app.property("oniEffectsEnabled") != self.settings.effects_enabled:
+            if app.styleSheet():apply_interaction_effects(app,STYLE,self.settings.effects_enabled)
+            else:app.setProperty("oniEffectsEnabled",self.settings.effects_enabled)
+        if persist:self.store.save(self.settings)
     def _definition_for_card(self, card): return device_definition(card.device_id)
     def _monitor_layout_names(self, device_id):
         return tuple(dict.fromkeys((*templates(device_id), *self.settings.monitor_layout_library.get(device_id, {}))))

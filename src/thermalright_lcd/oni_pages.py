@@ -532,13 +532,14 @@ class OniSettingsPage(QWidget):
         self.close_behavior = QComboBox(); self.close_behavior.addItem("Minimize to tray", "minimize_to_tray"); self.close_behavior.addItem("Exit application", "exit_application"); self.close_behavior.setCurrentIndex(max(0, self.close_behavior.findData(owner.settings.close_button_behavior)))
         self.default_fps = QComboBox(); self.default_fps.addItems(("Auto", "1", "2", "5", "10", "15", "30")); self.default_fps.setCurrentText(owner.settings.default_fps)
         self.default_mode = QComboBox(); self.default_mode.addItems(("Fit", "Fill", "Center")); self.default_mode.setCurrentText(owner.settings.default_display_mode)
-        for label_text, control in (("CLOSE BUTTON BEHAVIOR", self.close_behavior), ("DEFAULT OUTPUT FPS", self.default_fps), ("DEFAULT MEDIA FIT", self.default_mode)):
+        self.effects = QComboBox(); self.effects.addItem("On", True); self.effects.addItem("Off", False); self.effects.setCurrentIndex(0 if owner.settings.effects_enabled else 1); self.effects.currentIndexChanged.connect(lambda: owner.set_effects_enabled(bool(self.effects.currentData()), persist=True))
+        for label_text, control in (("EFFECTS", self.effects), ("CLOSE BUTTON BEHAVIOR", self.close_behavior), ("DEFAULT OUTPUT FPS", self.default_fps), ("DEFAULT MEDIA FIT", self.default_mode)):
             label = QLabel(label_text); label.setObjectName("fieldLabel"); advanced.addWidget(label); advanced.addWidget(control)
         advanced.addStretch(); grid.addWidget(advanced_card, 1, 1); outer.addLayout(grid); outer.addStretch()
 
     def save(self) -> None:
         for field, box in self.checks.items(): setattr(self.owner.settings, field, box.isChecked())
-        interval = int(self.sensor_interval.currentText()); self.owner.settings.close_button_behavior = self.close_behavior.currentData(); self.owner.settings.close_to_tray = self.owner.settings.close_button_behavior == "minimize_to_tray"; self.owner.settings.default_fps = self.default_fps.currentText(); self.owner.settings.default_display_mode = self.default_mode.currentText()
+        interval = int(self.sensor_interval.currentText()); self.owner.settings.effects_enabled = bool(self.effects.currentData()); self.owner.settings.close_button_behavior = self.close_behavior.currentData(); self.owner.settings.close_to_tray = self.owner.settings.close_button_behavior == "minimize_to_tray"; self.owner.settings.default_fps = self.default_fps.currentText(); self.owner.settings.default_display_mode = self.default_mode.currentText()
         self.owner.apply_resource_mode(self.owner.settings.performance_mode); self.owner.settings.sensor_interval_ms = interval; self.owner.monitor_service.minimum_interval = max(0.1, interval / 1000); self.owner.monitor_timer.setInterval(max(500, interval)); self.owner.store.save(self.owner.settings)
 
 
