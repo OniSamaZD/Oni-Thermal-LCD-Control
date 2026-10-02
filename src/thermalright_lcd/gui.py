@@ -14,6 +14,7 @@ from .media import cache_overlay, render_static, render_image, FitMode, MediaPip
 from .playback import open_frame_source, FrameScheduler, SharedFrameScheduler
 from .settings import SettingsStore, AppSettings, DisplayProfile
 from .interaction_effects import apply_interaction_effects
+from .themes import normalize_theme_name, theme_tokens
 from .conflicts import thermalright_processes
 from .runtime import DisplaySession, SessionState
 from .output_rate import RATE_LABELS, resolve_output_rate
@@ -49,6 +50,12 @@ from .oni_pages import (
 MEDIA = media_filter()
 VIDEO_RATE_LABELS = ("Auto (Recommended)", "10", "15", "20", "24", "25", "30", "40", "50", "60")
 
+def _active_theme_tokens():
+    app=QApplication.instance();return theme_tokens(app.property("oniThemeName") if app is not None else "ONI Blue")
+
+def _theme_color(value: str, alpha: int = 255) -> QColor:
+    color=QColor(value);color.setAlpha(alpha);return color
+
 def _unsafe_media_directory(path: Path) -> bool:
     try:
         resolved = path.resolve(strict=False)
@@ -82,24 +89,24 @@ class AtmosphericShell(QWidget):
     """Static, resolution-independent Oni atmosphere behind the application."""
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect())
+        rect = QRectF(self.rect()); tokens=_active_theme_tokens()
         foundation = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        foundation.setColorAt(0.0, QColor("#030712")); foundation.setColorAt(.48, QColor("#070a18")); foundation.setColorAt(1.0, QColor("#040611"))
+        foundation.setColorAt(0.0, _theme_color(tokens.app_background)); foundation.setColorAt(.48, _theme_color(tokens.surface)); foundation.setColorAt(1.0, _theme_color(tokens.app_background))
         painter.fillRect(rect, foundation)
         for x, y, radius, inner, outer in (
-            (.08, .34, .47, QColor(25, 113, 175, 43), QColor(3, 8, 19, 0)),
-            (.55, .03, .42, QColor(100, 47, 190, 38), QColor(6, 7, 18, 0)),
-            (.92, .62, .39, QColor(27, 112, 157, 28), QColor(4, 7, 16, 0)),
-            (.48, .92, .32, QColor(74, 34, 145, 22), QColor(5, 6, 15, 0)),
+            (.08, .34, .47, _theme_color(tokens.accent,43), _theme_color(tokens.app_background,0)),
+            (.55, .03, .42, _theme_color(tokens.focus,38), _theme_color(tokens.app_background,0)),
+            (.92, .62, .39, _theme_color(tokens.accent_hover,28), _theme_color(tokens.app_background,0)),
+            (.48, .92, .32, _theme_color(tokens.accent_pressed,22), _theme_color(tokens.app_background,0)),
         ):
             glow = QRadialGradient(rect.width()*x, rect.height()*y, max(rect.width(), rect.height())*radius)
             glow.setColorAt(0, inner); glow.setColorAt(1, outer); painter.fillRect(rect, glow)
-        painter.setPen(QPen(QColor(74, 106, 191, 15), 1))
+        painter.setPen(QPen(_theme_color(tokens.focus,15), 1))
         for start, end in ((.08,.48),(.27,.70),(.51,.91),(.69,1.06)):
             path=QPainterPath(); path.moveTo(rect.width()*start,-20); path.cubicTo(rect.width()*(start+.10),rect.height()*.28,rect.width()*(end-.16),rect.height()*.64,rect.width()*end,rect.height()+20); painter.drawPath(path)
         painter.setPen(Qt.NoPen)
         for px, py, size in ((.13,.18,2.0),(.22,.76,1.5),(.39,.12,1.4),(.62,.31,1.8),(.73,.83,1.3),(.87,.17,1.5),(.94,.71,1.8)):
-            painter.setBrush(QColor(111, 176, 255, 26)); painter.drawEllipse(QRectF(rect.width()*px,rect.height()*py,size,size))
+            painter.setBrush(_theme_color(tokens.focus,26)); painter.drawEllipse(QRectF(rect.width()*px,rect.height()*py,size,size))
         painter.end()
 
 
@@ -131,9 +138,9 @@ class OniNavigationButton(QPushButton):
 
     def paintEvent(self, event):
         painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        bounds=QRectF(self.rect()).adjusted(1.5,1.5,-1.5,-1.5); radius=10.0
+        bounds=QRectF(self.rect()).adjusted(1.5,1.5,-1.5,-1.5); radius=10.0;tokens=_active_theme_tokens()
         base=QPainterPath(); base.addRoundedRect(bounds,radius,radius); painter.setClipPath(base)
-        painter.fillPath(base,QColor("#0b101c"))
+        painter.fillPath(base,_theme_color(tokens.surface))
         compact=self.width()<100
         if not compact and not self._art.isNull():
             art_left=max(126,self.width()*.40); art_target=QRectF(art_left,0,self.width()-art_left,self.height())
@@ -142,24 +149,24 @@ class OniNavigationButton(QPushButton):
             painter.setOpacity(.94 if self.isChecked() else .82); painter.drawPixmap(art_target,scaled,source); painter.setOpacity(1)
         shade=QLinearGradient(bounds.left(),0,bounds.right(),0)
         if self.isChecked():
-            shade.setColorAt(0,QColor(62,67,236,246)); shade.setColorAt(.40,QColor(54,53,188,220)); shade.setColorAt(.68,QColor(18,26,72,82)); shade.setColorAt(1,QColor(5,10,24,20))
+            shade.setColorAt(0,_theme_color(tokens.accent,246)); shade.setColorAt(.40,_theme_color(tokens.accent_pressed,220)); shade.setColorAt(.68,_theme_color(tokens.accent_subtle,82)); shade.setColorAt(1,_theme_color(tokens.app_background,20))
         elif self.underMouse():
-            shade.setColorAt(0,QColor(18,25,49,248)); shade.setColorAt(.44,QColor(18,27,55,205)); shade.setColorAt(.73,QColor(8,13,29,58)); shade.setColorAt(1,QColor(4,7,17,18))
+            shade.setColorAt(0,_theme_color(tokens.surface_hover,248)); shade.setColorAt(.44,_theme_color(tokens.surface_elevated,205)); shade.setColorAt(.73,_theme_color(tokens.surface,58)); shade.setColorAt(1,_theme_color(tokens.app_background,18))
         else:
-            shade.setColorAt(0,QColor(8,13,25,252)); shade.setColorAt(.44,QColor(11,17,32,216)); shade.setColorAt(.73,QColor(6,10,22,52)); shade.setColorAt(1,QColor(3,6,15,12))
+            shade.setColorAt(0,_theme_color(tokens.app_background,252)); shade.setColorAt(.44,_theme_color(tokens.surface,216)); shade.setColorAt(.73,_theme_color(tokens.app_background,52)); shade.setColorAt(1,_theme_color(tokens.app_background,12))
         painter.fillRect(bounds,shade); painter.setClipping(False)
         if self.isChecked():
-            painter.setPen(QPen(QColor(74,93,255,72),5)); painter.drawPath(base)
-        painter.setPen(QPen(QColor("#8178ff") if self.isChecked() else QColor("#29334a"),1.25)); painter.drawPath(base)
-        icon_box=QRectF((self.width()-42)/2 if compact else 12,16,42,42); icon_grad=QLinearGradient(icon_box.topLeft(),icon_box.bottomRight()); icon_grad.setColorAt(0,QColor("#55dfff")); icon_grad.setColorAt(.52,QColor("#397fe7")); icon_grad.setColorAt(1,QColor("#7449e8")); painter.setBrush(icon_grad); painter.setPen(QPen(QColor(161,232,255,115),1)); painter.drawRoundedRect(icon_box,8,8)
+            painter.setPen(QPen(_theme_color(tokens.focus,72),5)); painter.drawPath(base)
+        painter.setPen(QPen(_theme_color(tokens.focus if self.isChecked() else tokens.border_subtle),1.25)); painter.drawPath(base)
+        icon_box=QRectF((self.width()-42)/2 if compact else 12,16,42,42); icon_grad=QLinearGradient(icon_box.topLeft(),icon_box.bottomRight()); icon_grad.setColorAt(0,_theme_color(tokens.focus)); icon_grad.setColorAt(.52,_theme_color(tokens.accent_hover)); icon_grad.setColorAt(1,_theme_color(tokens.accent)); painter.setBrush(icon_grad); painter.setPen(QPen(_theme_color(tokens.focus,115),1)); painter.drawRoundedRect(icon_box,8,8)
         if not self._icon_art.isNull():
             icon_pixmap=self._icon_art.scaled(28,28,Qt.KeepAspectRatio,Qt.SmoothTransformation)
             painter.drawPixmap(QRectF(icon_box.center().x()-14,icon_box.center().y()-14,28,28),icon_pixmap,QRectF(icon_pixmap.rect()))
         else:
-            painter.setPen(QColor("#ffffff")); font=QFont("Segoe UI Symbol",16,QFont.DemiBold); painter.setFont(font); painter.drawText(icon_box,Qt.AlignCenter,self._icon)
+            painter.setPen(_theme_color(tokens.text_primary)); font=QFont("Segoe UI Symbol",16,QFont.DemiBold); painter.setFont(font); painter.drawText(icon_box,Qt.AlignCenter,self._icon)
         if not compact:
-            text_width=max(110,self.width()-78); painter.setPen(QColor("#ffffff") if self.isChecked() else QColor("#f4f5fb")); painter.setFont(QFont("Segoe UI Variable",11,QFont.DemiBold)); painter.drawText(QRectF(66,12,text_width,27),Qt.AlignLeft|Qt.AlignVCenter,self._title)
-            painter.setPen(QColor("#d3d6ed") if self.isChecked() else QColor("#aeb6c9")); painter.setFont(QFont("Segoe UI Variable",8)); painter.drawText(QRectF(66,38,text_width,21),Qt.AlignLeft|Qt.AlignVCenter,self._subtitle)
+            text_width=max(110,self.width()-78); painter.setPen(_theme_color(tokens.text_primary)); painter.setFont(QFont("Segoe UI Variable",11,QFont.DemiBold)); painter.drawText(QRectF(66,12,text_width,27),Qt.AlignLeft|Qt.AlignVCenter,self._title)
+            painter.setPen(_theme_color(tokens.text_secondary if self.isChecked() else tokens.text_muted)); painter.setFont(QFont("Segoe UI Variable",8)); painter.drawText(QRectF(66,38,text_width,21),Qt.AlignLeft|Qt.AlignVCenter,self._subtitle)
         painter.end()
 
 
@@ -200,8 +207,9 @@ class SupportedDisplaysDialog(QDialog):
             if brand!="All manufacturers" and model.manufacturer!=brand:continue
             live=("  ·  ACTIVE" if state.active else "  ·  CONNECTED" if state.connected else "")
             row=QListWidgetItem(f"{model.model}\n{model.manufacturer}  ·  {model.status}{live}");row.setData(Qt.UserRole,state);row.setToolTip(model.notes);row.setSizeHint(QSize(0,56))
-            if state.active:row.setBackground(QColor("#123651"));row.setForeground(QColor("#8fe8ff"))
-            elif state.connected:row.setBackground(QColor("#10273b"));row.setForeground(QColor("#c9f4ff"))
+            tokens=_active_theme_tokens()
+            if state.active:row.setBackground(_theme_color(tokens.accent_subtle));row.setForeground(_theme_color(tokens.focus))
+            elif state.connected:row.setBackground(_theme_color(tokens.surface_hover));row.setForeground(_theme_color(tokens.text_secondary))
             self.models.addItem(row)
         if self.models.count():self.models.setCurrentRow(0)
         else:self.details.setText("No supported display matches this search.")
@@ -1205,7 +1213,7 @@ class DisplayCard(QFrame):
     def dragLeaveEvent(self,e):self._set_drop_highlight(False);super().dragLeaveEvent(e)
 
     def _set_drop_highlight(self,active):
-        border="3px solid #6fe7ff" if active else "none";background="#081523" if active else "transparent";self.preview.setProperty("dropActive",bool(active));self.preview.setStyleSheet(f"QLabel{{background:{background};border:{border};border-radius:{8 if self.device_id.endswith('5408') else 12}px;color:#7892a8;padding:2px}}")
+        tokens=theme_tokens(getattr(getattr(self.window(),"settings",None),"theme_name","ONI Blue"));border=f"3px solid {tokens.focus}" if active else "none";background=tokens.surface_hover if active else "transparent";self.preview.setProperty("dropActive",bool(active));self.preview.setStyleSheet(f"QLabel{{background:{background};border:{border};border-radius:{8 if self.device_id.endswith('5408') else 12}px;color:{tokens.text_muted};padding:2px}}")
 
     def fit_preview(self):
         self.auto_preview.setChecked(True);self._update_preview_geometry()
@@ -1246,7 +1254,7 @@ class DisplayCard(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self, discovery_provider=None, startup_discovery=None):
         super().__init__(); self.setWindowTitle("Oni Thermal LCD Control"); self.resize(1440, 860); self.setMinimumSize(820, 560)
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OniThermalLcd"; self.base = base; self.store = SettingsStore(base / "settings.json"); self.settings = self.store.load(); self.startup = StartupManager(); self.set_effects_enabled(self.settings.effects_enabled, persist=False)
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OniThermalLcd"; self.base = base; self.store = SettingsStore(base / "settings.json"); self.settings = self.store.load(); self.startup = StartupManager(); self.set_theme(self.settings.theme_name, persist=False)
         
         root = AtmosphericShell(); root.setObjectName("appShell"); self.setCentralWidget(root); shell = QHBoxLayout(root); shell.setContentsMargins(0, 0, 0, 0); shell.setSpacing(0)
         
@@ -1362,6 +1370,7 @@ class MainWindow(QMainWindow):
         self.media_page = OniMediaLibraryPage(self)
         self.sensor_theme_workspace = OniSensorThemesWorkspace(self, self._sensor_theme_store())
         self.sensor_theme_editor = self.sensor_theme_workspace.editor
+        self.sensor_theme_editor.apply_application_theme(self.settings.theme_name)
         self.profiles_page = OniProfilesPage(self)
         self.hardware_monitor_page = OniHardwareMonitorPage(self)
         self.performance_page = OniPerformancePage(self)
@@ -1435,11 +1444,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0,self.restore_desired_outputs)
 
     def _media_dialog_directory(self): return media_dialog_start_directory(self.settings.last_media_directory, self.base / "media")
+    def _apply_ui_appearance(self):
+        app=QApplication.instance();name=normalize_theme_name(self.settings.theme_name)
+        if app is not None and (app.property("oniThemeName")!=name or app.property("oniEffectsEnabled")!=self.settings.effects_enabled):
+            if app.styleSheet():apply_interaction_effects(app,STYLE,self.settings.effects_enabled,name)
+            else:app.setProperty("oniThemeName",name);app.setProperty("oniEffectsEnabled",self.settings.effects_enabled)
+        if hasattr(self,"sensor_theme_editor"):self.sensor_theme_editor.apply_application_theme(name)
+    def set_theme(self, name, *, persist=False):
+        self.settings.theme_name=normalize_theme_name(name);self._apply_ui_appearance()
+        if hasattr(self,"settings_page") and self.settings_page.theme.currentText()!=self.settings.theme_name:
+            self.settings_page.theme.blockSignals(True);self.settings_page.theme.setCurrentText(self.settings.theme_name);self.settings_page.theme.blockSignals(False)
+        if persist:self.store.save(self.settings)
     def set_effects_enabled(self, enabled, *, persist=False):
-        self.settings.effects_enabled=bool(enabled);app=QApplication.instance()
-        if app is not None and app.property("oniEffectsEnabled") != self.settings.effects_enabled:
-            if app.styleSheet():apply_interaction_effects(app,STYLE,self.settings.effects_enabled)
-            else:app.setProperty("oniEffectsEnabled",self.settings.effects_enabled)
+        self.settings.effects_enabled=bool(enabled);self._apply_ui_appearance()
         if persist:self.store.save(self.settings)
     def _definition_for_card(self, card): return device_definition(card.device_id)
     def _monitor_layout_names(self, device_id):
@@ -3034,7 +3051,7 @@ QScrollArea#pageScroll { border: none; background: transparent; }
 
 def main():
     log_path=Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"logs";configure_logging(log_path)
-    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);app.setStyleSheet(STYLE);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion("0.1.1");app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
+    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);initial=SettingsStore(Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"settings.json").load();apply_interaction_effects(app,STYLE,initial.effects_enabled,initial.theme_name);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion("0.1.1");app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
     instance=SingleInstance(os.environ.get("ONI_LCD_INSTANCE_NAME","OniThermalLcdControl-v1"),parent=app)
     if not instance.acquire_or_notify():return 0
     splash=OniSplash(bundled_path("assets/oni-thermal-lcd-icon.png"));splash.show();app.processEvents()

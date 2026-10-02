@@ -6,7 +6,7 @@ from uuid import uuid4
 from PySide6.QtCore import Qt, QRectF, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QBrush, QPen, QPainter, QFont, QImage, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFormLayout, QFrame, QGraphicsItem, QGraphicsRectItem,
     QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QFileDialog, QInputDialog,
@@ -17,6 +17,11 @@ from PySide6.QtWidgets import (
 from .hardware_monitor import MonitorElement, MonitorLayout, MonitorRenderer, WIDGET_KINDS, templates
 from .sensors import resolve_semantic_sensor
 from .layout_editing import LayoutEditController
+from .themes import theme_tokens
+
+
+def _active_theme_tokens():
+    app=QApplication.instance();return theme_tokens(app.property("oniThemeName") if app is not None else "ONI Blue")
 
 
 class ElementItem(QGraphicsRectItem):
@@ -43,12 +48,12 @@ class ElementItem(QGraphicsRectItem):
         # The complete dashboard is painted once by DesignerScene using the
         # production MonitorRenderer. Items are transparent hit targets so the
         # editor cannot replace gauges/graphs/bars with placeholder boxes.
-        painter.setRenderHint(QPainter.Antialiasing);painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor("#7183ff" if self.isSelected() else "#40506a"),2 if self.isSelected() else 1,Qt.DashLine if not self.isSelected() else Qt.SolidLine));painter.drawRoundedRect(self.rect(),8,8)
+        painter.setRenderHint(QPainter.Antialiasing);painter.setBrush(Qt.NoBrush);tokens=_active_theme_tokens()
+        painter.setPen(QPen(QColor(tokens.focus if self.isSelected() else tokens.border),2 if self.isSelected() else 1,Qt.DashLine if not self.isSelected() else Qt.SolidLine));painter.drawRoundedRect(self.rect(),8,8)
         if self.element.locked:
-            painter.setPen(QColor("#f2f6ff"));painter.drawText(self.rect().adjusted(4,4,-4,-4),Qt.AlignRight|Qt.AlignTop,"LOCK")
+            painter.setPen(QColor(tokens.text_primary));painter.drawText(self.rect().adjusted(4,4,-4,-4),Qt.AlignRight|Qt.AlignTop,"LOCK")
         if self.isSelected() and not self.element.locked:
-            painter.setBrush(QColor("#f2f6ff"));painter.setPen(QPen(QColor("#7183ff"),1));painter.drawRect(self.rect().right()-9,self.rect().bottom()-9,9,9)
+            painter.setBrush(QColor(tokens.text_primary));painter.setPen(QPen(QColor(tokens.focus),1));painter.drawRect(self.rect().right()-9,self.rect().bottom()-9,9,9)
     def mousePressEvent(self,event):
         self.designer_scene.controller.begin_external()
         corner=self.rect().adjusted(self.rect().width()-16,self.rect().height()-16,0,0)
@@ -89,7 +94,7 @@ class DesignerScene(QGraphicsScene):
         if not self.layout.alignment_guides:return
         selected=[x for x in self.selectedItems() if isinstance(x,ElementItem)]
         if not selected:return
-        item=selected[0];painter.setPen(QPen(QColor("#ff4fc8"),1,Qt.DashLine))
+        item=selected[0];painter.setPen(QPen(QColor(_active_theme_tokens().focus),1,Qt.DashLine))
         cx=item.sceneBoundingRect().center().x();cy=item.sceneBoundingRect().center().y()
         if abs(cx-self.layout.width/2)<6:painter.drawLine(self.layout.width/2,0,self.layout.width/2,self.layout.height)
         if abs(cy-self.layout.height/2)<6:painter.drawLine(0,self.layout.height/2,self.layout.width,self.layout.height/2)

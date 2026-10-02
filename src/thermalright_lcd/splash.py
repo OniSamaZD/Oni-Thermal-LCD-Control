@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from .themes import theme_tokens
 
 
 class OniSplash(QWidget):
@@ -19,6 +20,7 @@ class OniSplash(QWidget):
 
     def __init__(self, icon_path: Path):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        app=QApplication.instance();tokens=theme_tokens(app.property("oniThemeName") if app is not None else "ONI Blue")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(520, 300)
 
@@ -29,13 +31,13 @@ class OniSplash(QWidget):
         panel.setStyleSheet(
             "QFrame#oniSplashPanel {"
             "background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 #03070d, stop:0.55 #071522, stop:1 #0b2940);"
-            "border: 1px solid #2bc8ff; border-radius: 22px; }"
+            f"stop:0 {tokens.app_background}, stop:0.55 {tokens.surface}, stop:1 {tokens.accent_subtle});"
+            f"border: 1px solid {tokens.focus}; border-radius: 22px; }}"
         )
         shadow = QGraphicsDropShadowEffect(panel)
         shadow.setBlurRadius(42)
         shadow.setOffset(0, 0)
-        shadow.setColor(QColor(22, 184, 255, 115))
+        shadow_color=QColor(tokens.accent_hover);shadow_color.setAlpha(115);shadow.setColor(shadow_color)
         panel.setGraphicsEffect(shadow)
         outer.addWidget(panel)
 
@@ -53,24 +55,24 @@ class OniSplash(QWidget):
 
         title = QLabel("ONI")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color:#ffffff;font:800 32pt 'Segoe UI Variable','Segoe UI';letter-spacing:4px;")
+        title.setStyleSheet(f"color:{tokens.text_primary};font:800 32pt 'Segoe UI Variable','Segoe UI';letter-spacing:4px;")
         layout.addWidget(title)
 
         subtitle = QLabel("Thermal LCD Control")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color:#6fe7ff;font:600 12pt 'Segoe UI Variable','Segoe UI';letter-spacing:1px;")
+        subtitle.setStyleSheet(f"color:{tokens.focus};font:600 12pt 'Segoe UI Variable','Segoe UI';letter-spacing:1px;")
         layout.addWidget(subtitle)
 
         divider = QFrame()
         divider.setFixedHeight(1)
-        divider.setStyleSheet("background-color:#1b5877;border:none;")
+        divider.setStyleSheet(f"background-color:{tokens.divider};border:none;")
         layout.addSpacing(8)
         layout.addWidget(divider)
         layout.addSpacing(6)
 
         self.status = QLabel("Initializing displays…")
         self.status.setAlignment(Qt.AlignCenter)
-        self.status.setStyleSheet("color:#7892a8;font:9pt 'Segoe UI Variable','Segoe UI';")
+        self.status.setStyleSheet(f"color:{tokens.text_muted};font:9pt 'Segoe UI Variable','Segoe UI';")
         layout.addWidget(self.status)
 
     def center_on_screen(self) -> None:

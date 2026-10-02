@@ -15,7 +15,7 @@ from PIL import Image
 from PySide6.QtCore import QByteArray, QMimeData, QPointF, QRectF, QSize, Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox,
     QFileDialog, QFontComboBox, QFormLayout, QFrame, QGraphicsItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGroupBox, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
@@ -30,6 +30,11 @@ from .sensor_theme import (
 from .sensor_theme_package import export_theme_package
 from .sensor_theme_renderer import SensorThemeRenderer
 from .sensor_theme_store import SensorThemeStore, StoredTheme
+from .themes import theme_tokens
+
+
+def _active_theme_tokens():
+    app=QApplication.instance();return theme_tokens(app.property("oniThemeName") if app is not None else "ONI Blue")
 
 
 FRIENDLY_ELEMENT_NAMES = {
@@ -554,16 +559,16 @@ class SensorThemeElementItem(QGraphicsRectItem):
         selected = self.isSelected()
         if not selected and not self.element.locked:
             return
-        painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor("#6FE7FF" if selected else "#FFD166"), 3 if selected else 1, Qt.SolidLine if selected else Qt.DashLine))
+        painter.setBrush(Qt.NoBrush);tokens=_active_theme_tokens()
+        painter.setPen(QPen(QColor(tokens.focus if selected else tokens.warning), 3 if selected else 1, Qt.SolidLine if selected else Qt.DashLine))
         painter.drawRect(self.rect())
         if self.element.locked:
-            painter.setPen(QColor("#FFD166")); painter.drawText(self.rect().adjusted(5, 5, -5, -5), Qt.AlignRight | Qt.AlignTop, "LOCKED")
+            painter.setPen(QColor(tokens.warning)); painter.drawText(self.rect().adjusted(5, 5, -5, -5), Qt.AlignRight | Qt.AlignTop, "LOCKED")
         if selected and not self.element.locked:
-            painter.setPen(QPen(QColor("#6FE7FF"), 2)); painter.drawLine(self.rect().center().x(), self.rect().top(), self.rect().center().x(), self.rect().top() - self.ROTATE_OFFSET)
+            painter.setPen(QPen(QColor(tokens.focus), 2)); painter.drawLine(self.rect().center().x(), self.rect().top(), self.rect().center().x(), self.rect().top() - self.ROTATE_OFFSET)
             for name, handle in self._handles().items():
-                painter.setBrush(QColor("#FFB020" if name == "rotate" else "#EAFBFF"))
-                painter.setPen(QPen(QColor("#075F8B"), 1)); painter.drawEllipse(handle) if name == "rotate" else painter.drawRect(handle)
+                painter.setBrush(QColor(tokens.warning if name == "rotate" else tokens.text_primary))
+                painter.setPen(QPen(QColor(tokens.accent_pressed), 1)); painter.drawEllipse(handle) if name == "rotate" else painter.drawRect(handle)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self.scene() and not self.element.locked:
@@ -711,7 +716,7 @@ class SensorThemeScene(QGraphicsScene):
                 self._preview_cache = pixmap.toImage()
             except Exception as exc:
                 self._preview_cache = QImage(self.document.theme.canvas.width, self.document.theme.canvas.height, QImage.Format_RGB32)
-                self._preview_cache.fill(QColor("#22070B"))
+                self._preview_cache.fill(QColor(_active_theme_tokens().error))
                 painter.drawText(self.sceneRect(), Qt.AlignCenter, f"Preview error: {exc}")
         painter.drawImage(self.sceneRect(), self._preview_cache)
         if self.grid_enabled and self.grid_size > 1:
@@ -721,12 +726,12 @@ class SensorThemeScene(QGraphicsScene):
             while x <= canvas_rect.right(): painter.drawLine(QPointF(x, canvas_rect.top()), QPointF(x, canvas_rect.bottom())); x += self.grid_size
             y = math.floor(canvas_rect.top() / self.grid_size) * self.grid_size
             while y <= canvas_rect.bottom(): painter.drawLine(QPointF(canvas_rect.left(), y), QPointF(canvas_rect.right(), y)); y += self.grid_size
-        painter.setBrush(Qt.NoBrush); painter.setPen(QPen(QColor("#2BC8FF"), 3)); painter.drawRect(self.sceneRect())
+        painter.setBrush(Qt.NoBrush); painter.setPen(QPen(QColor(_active_theme_tokens().focus), 3)); painter.drawRect(self.sceneRect())
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         if not self.alignment_guides:
             return
-        painter.setPen(QPen(QColor("#FF4FC8"), 2, Qt.DashLine))
+        painter.setPen(QPen(QColor(_active_theme_tokens().focus), 2, Qt.DashLine))
         for orientation, position in self.guides:
             painter.drawLine(QPointF(position, 0), QPointF(position, self.sceneRect().height())) if orientation == "v" else painter.drawLine(QPointF(0, position), QPointF(self.sceneRect().width(), position))
 
@@ -758,7 +763,7 @@ class SensorThemeCanvasView(QGraphicsView):
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setAcceptDrops(True)
         self.setFrameShape(QFrame.NoFrame)
-        self.setBackgroundBrush(QColor("#02060A"))
+        self.setBackgroundBrush(QColor(_active_theme_tokens().app_background))
         self.setMinimumSize(520, 280)
 
     def fit_canvas(self) -> None:
@@ -1217,31 +1222,7 @@ class SensorThemeEditorPage(QWidget):
         self.splitter.setStretchFactor(0, 0); self.splitter.setStretchFactor(1, 1); self.splitter.setStretchFactor(2, 0)
         self.splitter.setSizes([290, 1040, 390]); root.addWidget(self.splitter, 1)
 
-        # Local Sensor Studio styling only; the application's global QSS is untouched.
-        self.setStyleSheet("""
-            QWidget#oniSensorStudio { background: #030912; color: #d8e9f6; }
-            QLabel#studioTitle { font-size: 20px; font-weight: 700; color: #f2fbff; }
-            QLabel#studioMuted { color: #7894a8; }
-            QLabel#studioState { color: #66d9ff; font-weight: 600; padding: 5px 10px; }
-            QFrame#studioBar, QFrame#studioCanvasPanel, QFrame#studioInspectorPanel {
-                background: #06111d; border: 1px solid #123149; border-radius: 8px;
-            }
-            QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
-                min-height: 28px; background: #0a1b2b; border: 1px solid #1a4766; border-radius: 5px; padding: 2px 8px; color: #d9edf8;
-            }
-            QPushButton:hover, QToolButton:hover { border-color: #25b9ef; background: #0d2639; }
-            QPushButton#studioAccent { background: #0879a8; border-color: #19bce8; color: white; font-weight: 600; }
-            QTabWidget#studioLeftTabs::pane { border: 1px solid #123149; background: #06111d; }
-            QTabBar::tab { background: #071522; border: 1px solid #123149; padding: 8px 10px; }
-            QTabBar::tab:selected { background: #0b2940; color: #6fe7ff; border-bottom: 2px solid #21c7f3; }
-            QListWidget#studioBrowser { background: #030a12; border: 1px solid #102b40; border-radius: 5px; }
-            QListWidget#studioBrowser::item { padding: 6px; border-bottom: 1px solid #0b2030; }
-            QListWidget#studioBrowser::item:selected { background: #0d3852; color: white; }
-            QGraphicsView#studioCanvas { background: #02060b; border: 1px solid #153b55; border-radius: 6px; }
-            QGroupBox { border: 1px solid #16384f; border-radius: 6px; margin-top: 10px; padding-top: 8px; font-weight: 600; }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #7fdfff; }
-            QScrollArea#studioProperties { border: 0; background: transparent; }
-        """)
+        self.apply_application_theme("ONI Blue")
 
         # ---- wiring -----------------------------------------------------------------
         self.palette.addRequested.connect(self.add_element); self.canvas.elementDropped.connect(self.add_element)
@@ -1264,6 +1245,12 @@ class SensorThemeEditorPage(QWidget):
         else: self.document.new("Untitled Theme")
         self.refresh_sensor_browser()
         QTimer.singleShot(0, self.fit_canvas)
+
+    def apply_application_theme(self, theme_name: str) -> None:
+        from .themes import sensor_studio_stylesheet
+        self.setStyleSheet(sensor_studio_stylesheet(theme_name))
+        if hasattr(self,"canvas"):
+            self.canvas.setBackgroundBrush(QColor(theme_tokens(theme_name).app_background));self.canvas.viewport().update()
 
     def attach_navigation_guard(self, stack: QStackedWidget) -> None:
         self._navigation_stack = stack

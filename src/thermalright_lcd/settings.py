@@ -21,6 +21,7 @@ class AppSettings:
     remember_window_position:bool=True;default_fps:str="Auto";default_display_mode:str="Fit";stale_frame_dropping:bool=True;resume_playback:bool=True
     hardware_decode:bool=False
     effects_enabled:bool=True
+    theme_name:str="ONI Blue"
     performance_mode:str="Normal";sensor_interval_ms:int=500
     last_media_directory:str=""
     media_library:list[str]=field(default_factory=list)
@@ -64,7 +65,9 @@ class SettingsStore:
         known={k:raw.get(k,getattr(AppSettings(),k)) for k in (
             "start_minimized","close_to_tray","close_button_behavior","start_with_windows","minimize_to_tray",
             "restore_previous_media","auto_reconnect","remember_window_position","default_fps","default_display_mode","stale_frame_dropping",
-            "resume_playback","hardware_decode","effects_enabled","performance_mode","sensor_interval_ms","last_media_directory","media_library","sensor_favorites","recent_sensors","monitor_layouts","monitor_layout_library","designer_geometry","window_geometry","window_maximized","sidebar_expanded","display_layout","display_order","splitter_sizes","preview_scales","advanced_expanded","active_profile","display_sync","unified_sync_view","link_brightness","output_modes","monitor_templates","sensor_theme_ids","sensor_theme_fps")}
+            "resume_playback","hardware_decode","effects_enabled","theme_name","performance_mode","sensor_interval_ms","last_media_directory","media_library","sensor_favorites","recent_sensors","monitor_layouts","monitor_layout_library","designer_geometry","window_geometry","window_maximized","sidebar_expanded","display_layout","display_order","splitter_sizes","preview_scales","advanced_expanded","active_profile","display_sync","unified_sync_view","link_brightness","output_modes","monitor_templates","sensor_theme_ids","sensor_theme_fps")}
+        from .themes import normalize_theme_name
+        known["theme_name"]=normalize_theme_name(known["theme_name"])
         if known["display_layout"] not in {"side_by_side","stacked"}:known["display_layout"]="stacked"
         if not isinstance(known["display_order"],list) or not all(isinstance(item,str) for item in known["display_order"]):known["display_order"]=[]
         # Old builds persisted the former false-by-default checkbox even when

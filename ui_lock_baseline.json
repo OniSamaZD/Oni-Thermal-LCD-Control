@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "algorithm": "source-block-sha256-v1",
-  "approved_gui_sha256": "506502ca2920e351afed94cb64dd0dba884719ce0834fef3696c88e57e9252ad",
+  "approved_gui_sha256": "358f806cecf5e12b05fcd93e3e6e40855cb9c69dfd93663d074d9ca4e41639a1",
   "protected": {
     "PreviewLabel.__init__": "ae324e45d9075e6efb665e2dfd9ab2aa0d5ceeb9637ad0490c8da58141e2462b",
     "PreviewLabel.sizeHint": "833025f6f69983b3d85ddf96d4787c9c242dfdf47c06d67fda1acc4fea90b853",
@@ -15,7 +15,7 @@
     "DisplayCard.sizeHint": "9fd71eb42d2b98fa794765275b4daa1e01e694221785eff7a8336a4fa0ee8120",
     "DisplayCard.set_layout_mode": "c07c4c13e1597857cfccbb0b820eeae636c0e81fd971f6a2d7fe69fc7150878c",
     "DisplayCard.resizeEvent": "3a551e65a0a5deb9b7dcaa88df177762f10bacb09b7c52ec25171ada2b954ed9",
-    "MainWindow.__init__": "a109df423c09e8b445372c75a888f3184c166ae901b2e29facd21709dec9039d",
+    "MainWindow.__init__": "edcacb6c92e0d2842f5ca9d09a31a89d2710b9826ed0f16cc5c9257d4460acb7",
     "MainWindow.set_display_layout": "22bc22209589c7440ba873681195a3ee33990487fbf68b17188266deeb091727",
     "MainWindow.swap_display_order": "e199200aee0f13d666f8002f2aaf085f3b26d0ac27889c4a6735a7656074f6a4",
     "MainWindow.toggle_sidebar": "2ffd93e4a7cc32bc0d2784d66b952c684da81230d6a50dfb8551f96c44844766",

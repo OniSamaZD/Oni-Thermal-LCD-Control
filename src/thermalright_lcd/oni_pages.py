@@ -23,6 +23,15 @@ from .sensor_theme_editor import SensorThemeEditorPage, _image_to_pixmap, SAMPLE
 from .sensor_theme import SensorBindingResolver
 from .sensor_theme_renderer import SensorThemeRenderer
 from .sensor_theme_store import SensorThemeStore
+from .themes import theme_tokens
+
+
+def _active_theme_tokens():
+    app=QApplication.instance();return theme_tokens(app.property("oniThemeName") if app is not None else "ONI Blue")
+
+
+def _theme_color(value: str, alpha: int = 255) -> QColor:
+    color=QColor(value);color.setAlpha(alpha);return color
 
 
 class OniCard(QFrame):
@@ -30,11 +39,11 @@ class OniCard(QFrame):
         super().__init__(parent); self.setObjectName("oniCard"); self.setProperty("role", role)
 
     def paintEvent(self, event) -> None:
-        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); bounds=self.rect().adjusted(1,1,-1,-1); role=self.property("role")
+        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); bounds=self.rect().adjusted(1,1,-1,-1); role=self.property("role");tokens=_active_theme_tokens()
         fill=QLinearGradient(bounds.topLeft(),bounds.bottomRight())
-        if role == "metric": colors=(QColor(20,30,60,238),QColor(7,15,34,242)); border=QColor(66,96,168,155)
-        elif role == "device": colors=(QColor(22,32,65,240),QColor(7,17,39,242)); border=QColor(74,108,179,175)
-        else: colors=(QColor(16,23,49,237),QColor(6,11,27,243)); border=QColor(68,79,145,165)
+        if role == "metric": colors=(_theme_color(tokens.surface_elevated,238),_theme_color(tokens.surface,242)); border=_theme_color(tokens.border,155)
+        elif role == "device": colors=(_theme_color(tokens.surface_elevated,240),_theme_color(tokens.surface,242)); border=_theme_color(tokens.card_border,175)
+        else: colors=(_theme_color(tokens.card_background,237),_theme_color(tokens.surface,243)); border=_theme_color(tokens.card_border,165)
         fill.setColorAt(0,colors[0]); fill.setColorAt(1,colors[1]); painter.setBrush(fill); painter.setPen(QPen(border,1)); painter.drawRoundedRect(bounds,12,12); painter.end()
 
 
@@ -56,7 +65,7 @@ class OniArtworkCard(OniCard):
         scaled = self._art.scaled(target.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
         source_x = max(0, (scaled.width() - target.width()) // 2); source_y = max(0, (scaled.height() - target.height()) // 2)
         painter.drawPixmap(target, scaled, scaled.rect().adjusted(source_x, source_y, -source_x, -source_y))
-        shade = QLinearGradient(target.left(), target.top(), target.right(), target.top()); shade.setColorAt(0, QColor(3, 7, 17, 242)); shade.setColorAt(.48, QColor(7, 8, 24, 198)); shade.setColorAt(.78, QColor(8, 9, 26, 70)); shade.setColorAt(1, QColor(4, 6, 15, 22)); painter.fillRect(target, shade); painter.end()
+        tokens=_active_theme_tokens();shade = QLinearGradient(target.left(), target.top(), target.right(), target.top()); shade.setColorAt(0, _theme_color(tokens.app_background,242)); shade.setColorAt(.48, _theme_color(tokens.surface,198)); shade.setColorAt(.78, _theme_color(tokens.surface_elevated,70)); shade.setColorAt(1, _theme_color(tokens.app_background,22)); painter.fillRect(target, shade); painter.end()
 
 
 class OniPageHeader(QWidget):
@@ -87,12 +96,12 @@ class OniDisplayGlyph(QWidget):
         super().__init__(parent); self.setFixedSize(104, 66); self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event) -> None:
-        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
-        glow=QRadialGradient(52,30,48); glow.setColorAt(0,QColor(57,178,255,70)); glow.setColorAt(1,QColor(86,57,212,0)); painter.fillRect(self.rect(),glow)
-        shell=self.rect().adjusted(10,9,-10,-17); painter.setPen(QPen(QColor("#7bdcff"),2)); painter.setBrush(QColor(10,20,48,210)); painter.drawRoundedRect(shell,7,7)
-        screen=shell.adjusted(6,6,-6,-6); fill=QLinearGradient(screen.topLeft(),screen.bottomRight()); fill.setColorAt(0,QColor("#26388f")); fill.setColorAt(1,QColor("#4f268a")); painter.setBrush(fill); painter.setPen(QPen(QColor(143,120,255,150),1)); painter.drawRoundedRect(screen,4,4)
-        painter.setPen(QPen(QColor(123,220,255,120),1)); painter.drawLine(screen.left()+8,screen.bottom()-7,screen.left()+23,screen.top()+10); painter.drawLine(screen.left()+23,screen.top()+10,screen.left()+36,screen.bottom()-13); painter.drawLine(screen.left()+36,screen.bottom()-13,screen.right()-8,screen.top()+8)
-        painter.setPen(QPen(QColor("#6977ad"),2)); painter.drawLine(44,52,60,52); painter.drawLine(36,57,68,57); painter.end()
+        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing);tokens=_active_theme_tokens()
+        glow=QRadialGradient(52,30,48); glow.setColorAt(0,_theme_color(tokens.focus,70)); glow.setColorAt(1,_theme_color(tokens.accent,0)); painter.fillRect(self.rect(),glow)
+        shell=self.rect().adjusted(10,9,-10,-17); painter.setPen(QPen(_theme_color(tokens.focus),2)); painter.setBrush(_theme_color(tokens.surface_elevated,210)); painter.drawRoundedRect(shell,7,7)
+        screen=shell.adjusted(6,6,-6,-6); fill=QLinearGradient(screen.topLeft(),screen.bottomRight()); fill.setColorAt(0,_theme_color(tokens.accent_pressed)); fill.setColorAt(1,_theme_color(tokens.accent)); painter.setBrush(fill); painter.setPen(QPen(_theme_color(tokens.focus,150),1)); painter.drawRoundedRect(screen,4,4)
+        painter.setPen(QPen(_theme_color(tokens.focus,120),1)); painter.drawLine(screen.left()+8,screen.bottom()-7,screen.left()+23,screen.top()+10); painter.drawLine(screen.left()+23,screen.top()+10,screen.left()+36,screen.bottom()-13); painter.drawLine(screen.left()+36,screen.bottom()-13,screen.right()-8,screen.top()+8)
+        painter.setPen(QPen(_theme_color(tokens.border),2)); painter.drawLine(44,52,60,52); painter.drawLine(36,57,68,57); painter.end()
 
 
 class OniMetricCard(OniCard):
@@ -134,11 +143,11 @@ class OniHomePage(QWidget):
     )
 
     def paintEvent(self, event) -> None:
-        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); rect=self.rect()
-        base=QLinearGradient(rect.topLeft(),rect.bottomRight()); base.setColorAt(0,QColor("#071224")); base.setColorAt(.45,QColor("#0b0c21")); base.setColorAt(1,QColor("#061321")); painter.fillRect(rect,base)
-        for x,y,radius,color in ((.06,.35,.44,QColor(25,118,179,34)),(.61,.03,.38,QColor(103,48,194,32)),(.93,.70,.34,QColor(31,122,166,25))):
+        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); rect=self.rect();tokens=_active_theme_tokens()
+        base=QLinearGradient(rect.topLeft(),rect.bottomRight()); base.setColorAt(0,_theme_color(tokens.surface)); base.setColorAt(.45,_theme_color(tokens.app_background)); base.setColorAt(1,_theme_color(tokens.surface)); painter.fillRect(rect,base)
+        for x,y,radius,color in ((.06,.35,.44,_theme_color(tokens.accent_hover,34)),(.61,.03,.38,_theme_color(tokens.accent,32)),(.93,.70,.34,_theme_color(tokens.focus,25))):
             glow=QRadialGradient(rect.width()*x,rect.height()*y,max(rect.width(),rect.height())*radius); glow.setColorAt(0,color); glow.setColorAt(1,QColor(color.red(),color.green(),color.blue(),0)); painter.fillRect(rect,glow)
-        painter.setPen(QPen(QColor(99,121,222,13),1))
+        painter.setPen(QPen(_theme_color(tokens.focus,13),1))
         for offset in (.16,.43,.71):
             path=QPainterPath(); path.moveTo(rect.width()*offset,-20); path.cubicTo(rect.width()*(offset+.08),rect.height()*.30,rect.width()*(offset+.15),rect.height()*.63,rect.width()*(offset+.30),rect.height()+20); painter.drawPath(path)
         painter.end()
@@ -532,14 +541,16 @@ class OniSettingsPage(QWidget):
         self.close_behavior = QComboBox(); self.close_behavior.addItem("Minimize to tray", "minimize_to_tray"); self.close_behavior.addItem("Exit application", "exit_application"); self.close_behavior.setCurrentIndex(max(0, self.close_behavior.findData(owner.settings.close_button_behavior)))
         self.default_fps = QComboBox(); self.default_fps.addItems(("Auto", "1", "2", "5", "10", "15", "30")); self.default_fps.setCurrentText(owner.settings.default_fps)
         self.default_mode = QComboBox(); self.default_mode.addItems(("Fit", "Fill", "Center")); self.default_mode.setCurrentText(owner.settings.default_display_mode)
+        from .themes import THEME_NAMES
+        self.theme = QComboBox(); self.theme.addItems(THEME_NAMES); self.theme.setCurrentText(owner.settings.theme_name); self.theme.currentTextChanged.connect(lambda name: owner.set_theme(name, persist=True))
         self.effects = QComboBox(); self.effects.addItem("On", True); self.effects.addItem("Off", False); self.effects.setCurrentIndex(0 if owner.settings.effects_enabled else 1); self.effects.currentIndexChanged.connect(lambda: owner.set_effects_enabled(bool(self.effects.currentData()), persist=True))
-        for label_text, control in (("EFFECTS", self.effects), ("CLOSE BUTTON BEHAVIOR", self.close_behavior), ("DEFAULT OUTPUT FPS", self.default_fps), ("DEFAULT MEDIA FIT", self.default_mode)):
+        for label_text, control in (("THEME", self.theme), ("EFFECTS", self.effects), ("CLOSE BUTTON BEHAVIOR", self.close_behavior), ("DEFAULT OUTPUT FPS", self.default_fps), ("DEFAULT MEDIA FIT", self.default_mode)):
             label = QLabel(label_text); label.setObjectName("fieldLabel"); advanced.addWidget(label); advanced.addWidget(control)
         advanced.addStretch(); grid.addWidget(advanced_card, 1, 1); outer.addLayout(grid); outer.addStretch()
 
     def save(self) -> None:
         for field, box in self.checks.items(): setattr(self.owner.settings, field, box.isChecked())
-        interval = int(self.sensor_interval.currentText()); self.owner.settings.effects_enabled = bool(self.effects.currentData()); self.owner.settings.close_button_behavior = self.close_behavior.currentData(); self.owner.settings.close_to_tray = self.owner.settings.close_button_behavior == "minimize_to_tray"; self.owner.settings.default_fps = self.default_fps.currentText(); self.owner.settings.default_display_mode = self.default_mode.currentText()
+        interval = int(self.sensor_interval.currentText()); self.owner.settings.theme_name = self.theme.currentText(); self.owner.settings.effects_enabled = bool(self.effects.currentData()); self.owner.settings.close_button_behavior = self.close_behavior.currentData(); self.owner.settings.close_to_tray = self.owner.settings.close_button_behavior == "minimize_to_tray"; self.owner.settings.default_fps = self.default_fps.currentText(); self.owner.settings.default_display_mode = self.default_mode.currentText()
         self.owner.apply_resource_mode(self.owner.settings.performance_mode); self.owner.settings.sensor_interval_ms = interval; self.owner.monitor_service.minimum_interval = max(0.1, interval / 1000); self.owner.monitor_timer.setInterval(max(500, interval)); self.owner.store.save(self.owner.settings)
 
 
