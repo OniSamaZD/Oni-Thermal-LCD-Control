@@ -21,6 +21,16 @@ from .dual_live import run_dual_persistence
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="thermalright-lcd")
     sub = parser.add_subparsers(dest="command", required=True)
+    diagnostic = sub.add_parser("diagnostic", help="read-only community display diagnostics")
+    diagnostic_sub = diagnostic.add_subparsers(dest="diagnostic_command", required=True)
+    diagnostic_scan = diagnostic_sub.add_parser("scan", help="list Safe Scan candidates; performs no writes")
+    diagnostic_scan.add_argument("--target", help="optional exact PnP instance ID")
+    diagnostic_export = diagnostic_sub.add_parser("export", help="create a public Safe Scan support package")
+    diagnostic_export.add_argument("--target", required=True, help="exact PnP instance ID selected from scan")
+    diagnostic_export.add_argument("--output", type=Path, default=Path("analysis"))
+    diagnostic_export.add_argument("--include-private", action="store_true", help="explicitly include raw machine-specific identity")
+    diagnostic_inspect = diagnostic_sub.add_parser("inspect", help="validate and inspect an untrusted support package")
+    diagnostic_inspect.add_argument("package", type=Path)
     a = sub.add_parser("analyze", help="offline analysis of a USBPcap PCAPNG")
     a.add_argument("capture", type=Path)
     a.add_argument("--output", type=Path, default=Path("analysis/display_9_16"))
@@ -100,6 +110,23 @@ def main(argv=None) -> int:
     cr.add_argument("capture",type=Path);cr.add_argument("--session-file",type=Path,default=Path("analysis/session-report.json"))
     cr.add_argument("--transaction-file",type=Path,default=Path("analysis/pid5302-same-session-first-frame.json"));cr.add_argument("--output",type=Path,required=True)
     args = parser.parse_args(argv)
+    if args.command == "diagnostic":
+        from .diagnostics import SafeScanner, export_support_package, inspect_support_package
+        if args.diagnostic_command == "inspect":
+            print(json.dumps(inspect_support_package(args.package), indent=2)); return 0
+        from .windows_hid import enumerate_paths, inspect_path
+        from .diagnostics import read_only_winusb_interfaces
+        scanner = SafeScanner(hid_enumerator=enumerate_paths, hid_inspector=inspect_path,
+                              usb_descriptor_reader=read_only_winusb_interfaces)
+        results = scanner.scan(getattr(args, "target", None))
+        if args.diagnostic_command == "scan":
+            print(json.dumps([{"instance_id": item.fingerprint.instance_id, "vid_pid": item.fingerprint.vid_pid,
+                               "transport": item.fingerprint.transport_types, "catalog_match": item.match.state.value,
+                               "protocol_verification": item.match.protocol_verification,
+                               "warnings": item.warnings} for item in results], indent=2)); return 0
+        path = export_support_package(results, args.output, include_private=args.include_private)
+        print(json.dumps({"package": str(path), "targets": len(results), "safe_scan": True,
+                          "active_write_operations_performed": False}, indent=2)); return 0
     if args.command == "analyze":
         print(json.dumps(analyze(args.capture, args.output, args.device), indent=2))
         return 0

@@ -19,6 +19,7 @@ ERROR_DEVICE_NOT_CONNECTED=1167
 @dataclass(frozen=True)
 class HidInterface:
     path:str; vid:int; pid:int; version:int; input_report_bytes:int; output_report_bytes:int; feature_report_bytes:int=0
+    usage_page:int|None=None;usage:int|None=None
 
 class _GUID(c.Structure):
     _fields_=[("Data1",w.DWORD),("Data2",w.WORD),("Data3",w.WORD),("Data4",c.c_ubyte*8)]
@@ -54,7 +55,7 @@ def inspect_path(path:str, api=None)->HidInterface:
         if not h.HidD_GetAttributes(handle,c.byref(attr)): raise OSError(c.get_last_error(),"HidD_GetAttributes")
         if not h.HidD_GetPreparsedData(handle,c.byref(prep)): raise OSError(c.get_last_error(),"HidD_GetPreparsedData")
         if h.HidP_GetCaps(prep,c.byref(caps))<0: raise OSError("HidP_GetCaps")
-        return HidInterface(path,attr.VendorID,attr.ProductID,attr.VersionNumber,caps.InputReportByteLength,caps.OutputReportByteLength,caps.FeatureReportByteLength)
+        return HidInterface(path,attr.VendorID,attr.ProductID,attr.VersionNumber,caps.InputReportByteLength,caps.OutputReportByteLength,caps.FeatureReportByteLength,caps.UsagePage,caps.Usage)
     finally:
         if prep:h.HidD_FreePreparsedData(prep)
         k.CloseHandle(handle)

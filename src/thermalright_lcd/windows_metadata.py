@@ -22,6 +22,9 @@ class WindowsDeviceMetadata:
     hardware_ids: tuple[str, ...]
     compatible_ids: tuple[str, ...]
     class_name: str
+    driver_inf: str = ""
+    manufacturer: str = ""
+    description: str = ""
 
     @property
     def vid_pid(self) -> str:
@@ -93,6 +96,9 @@ def parse_windows_metadata_snapshot(payload: str) -> WindowsMetadataSnapshot:
             hardware_ids=_strings(value.get("hardware_ids")),
             compatible_ids=_strings(value.get("compatible_ids")),
             class_name=str(value.get("class_name") or "").strip(),
+            driver_inf=str(value.get("driver_inf") or "").strip(),
+            manufacturer=str(value.get("manufacturer") or "").strip(),
+            description=str(value.get("description") or "").strip(),
         ))
     return WindowsMetadataSnapshot(tuple(devices))
 
@@ -135,6 +141,8 @@ _KEYS = {
     "parent": _key("{4340A6C5-93FA-4706-972C-7B648008A5A7}", 8),
     "container_id": _key("{8C7ED206-3F8A-4827-B3AB-AE9E1FAEFC6C}", 2),
     "bus_reported_desc": _key("{540B947E-8B40-45BC-A8A2-6A0B894CBDA2}", 4),
+    "manufacturer": _key(_DEVICE_KEY, 13),
+    "driver_inf": _key("{A8B865DD-2E3D-4094-AD97-E593A70C75D6}", 5),
 }
 _DEVPROP_TYPE_GUID = 0x0D
 _DEVPROP_TYPE_STRING = 0x12
@@ -219,16 +227,25 @@ class CtypesWindowsMetadataApi:
 
     def _device_record(self, info: SP_DEVINFO_DATA) -> dict:
         instance_id = self._instance_id(info)
-        values = {name: self._property(info, key) for name, key in _KEYS.items() if name != "bus_reported_desc"}
+        values = {name: self._property(info, key) for name, key in _KEYS.items()}
         locations = values.get("location_paths") or ()
         if isinstance(locations, str): locations = (locations,)
         return {"instance_id": instance_id, "status": self._status(info.DevInst),
                 "container_id": values.get("container_id") or "", "service": values.get("service") or "",
                 "location": "|".join(locations), "parent": values.get("parent") or "",
                 "hardware_ids": list(values.get("hardware_ids") or ()),
-                "compatible_ids": list(values.get("compatible_ids") or ()), "class_name": values.get("class_name") or ""}
+                "compatible_ids": list(values.get("compatible_ids") or ()), "class_name": values.get("class_name") or "",
+                "driver_inf": values.get("driver_inf") or "", "manufacturer": values.get("manufacturer") or "",
+                "description": values.get("bus_reported_desc") or ""}
 
     def enumerate_present_devices(self) -> tuple[dict, ...]:
+        return self._enumerate_present(False)
+
+    def enumerate_present_usb_devices(self) -> tuple[dict, ...]:
+        """Broad USB identity snapshot for an explicit diagnostic scan only."""
+        return self._enumerate_present(True)
+
+    def _enumerate_present(self, diagnostic_candidates: bool) -> tuple[dict, ...]:
         self._set = self.setup.SetupDiGetClassDevsW(None, None, None, _DIGCF_PRESENT | _DIGCF_ALLCLASSES)
         if self._set == c.c_void_p(-1).value: raise OSError(c.get_last_error(), "SetupDiGetClassDevsW")
         try:
@@ -240,7 +257,8 @@ class CtypesWindowsMetadataApi:
                     raise OSError(c.get_last_error(), "SetupDiEnumDeviceInfo")
                 index+=1
                 instance=self._instance_id(info)
-                if re.search(r"VID_(0416|87AD|87CD|0402)&PID_(5302|5408|70DB|5409|5406|3922)", instance, re.I):
+                known=re.search(r"VID_(0416|87AD|87CD|0402)&PID_(5302|5408|70DB|5409|5406|3922)",instance,re.I)
+                if known or (diagnostic_candidates and re.search(r"^(?:USB|HID)\\.*VID_[0-9A-F]{4}&PID_[0-9A-F]{4}",instance,re.I)):
                     output.append(self._device_record(info))
             return tuple(output)
         finally:
@@ -299,10 +317,12 @@ def _snapshot_from_records(records) -> WindowsMetadataSnapshot:
     return parse_windows_metadata_snapshot(json.dumps(list(records)))
 
 
-def collect_windows_metadata_snapshot(api=None) -> WindowsMetadataSnapshot:
+def collect_windows_metadata_snapshot(api=None, *, diagnostic_candidates: bool = False) -> WindowsMetadataSnapshot:
     """Collect a fresh immutable native snapshot for one discovery transaction."""
     try:
-        return _snapshot_from_records((api or CtypesWindowsMetadataApi()).enumerate_present_devices())
+        native=api or CtypesWindowsMetadataApi()
+        method=native.enumerate_present_usb_devices if diagnostic_candidates and hasattr(native,"enumerate_present_usb_devices") else native.enumerate_present_devices
+        return _snapshot_from_records(method())
     except SafetyError:
         raise
     except (OSError, ValueError, UnicodeError) as exc:

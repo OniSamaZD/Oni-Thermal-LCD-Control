@@ -1,0 +1,32 @@
+{
+  "schema": "oni-hardware-reference/1",
+  "internal_key": "peerless-vision-360",
+  "identity": {
+    "vid": 34733,
+    "pid": 28891,
+    "vid_pid": "87ad:70db",
+    "provenance": "CATALOG_REFERENCE"
+  },
+  "expected_transport": {
+    "value": "winusb",
+    "provenance": "CATALOG_REFERENCE"
+  },
+  "possible_protocol": {
+    "value": "ChiZhu",
+    "provenance": "CATALOG_REFERENCE",
+    "verification": "REQUIRED"
+  },
+  "reference_identifier": {
+    "value": "SSCRM-V1",
+    "provenance": "CATALOG_REFERENCE"
+  },
+  "reference_resolution": {
+    "value": [480, 480],
+    "provenance": "CATALOG_REFERENCE"
+  },
+  "physical_resolution": {
+    "value": null,
+    "provenance": "UNKNOWN",
+    "verification": "NONE"
+  }
+}
