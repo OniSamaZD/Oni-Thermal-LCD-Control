@@ -42,6 +42,7 @@ from .devices.registry import DEVICES, device_definition
 from .devices.catalog import catalog_models
 from .supported_displays import LiveDisplayState, catalog_live_states, filter_catalog_states, match_catalog_model
 from .preview_layout import PhysicalPreviewSpec, physical_preview_sizes
+from .help_add_display import HelpAddDisplayDialog
 from .oni_pages import (
     OniDiagnosticsPage, OniHardwareMonitorPage, OniHomePage, OniMediaLibraryPage,
     OniPerformancePage, OniProfilesPage, OniSensorThemesWorkspace, OniSettingsPage, scroll_page,
@@ -181,9 +182,12 @@ class SupportedDisplaysDialog(QDialog):
         filters=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Search model, manufacturer, VID:PID or protocol…");self.search.setClearButtonEnabled(True);self.status_filter=QComboBox();self.status_filter.addItems(("All","Verified","Experimental","Unsupported / Incomplete"));self.connected_only=QCheckBox("Connected only");filters.addWidget(self.search,1);filters.addWidget(self.status_filter);filters.addWidget(self.connected_only);outer.addLayout(filters)
         body=QSplitter(Qt.Horizontal);self.brands=QListWidget();self.brands.setMinimumWidth(210);self.models=QListWidget();self.models.setSpacing(6);self.models.setWordWrap(True);self.details=QLabel();self.details.setWordWrap(True);self.details.setAlignment(Qt.AlignTop|Qt.AlignLeft);self.details.setObjectName("diagnosticSummary");self.details.setMinimumWidth(280)
         body.addWidget(self.brands);body.addWidget(self.models);body.addWidget(self.details);body.setStretchFactor(1,2);body.setStretchFactor(2,2);outer.addWidget(body,1)
-        buttons=QDialogButtonBox(QDialogButtonBox.Close);buttons.rejected.connect(self.accept);outer.addWidget(buttons)
+        buttons=QDialogButtonBox(QDialogButtonBox.Close);help_add=buttons.addButton("Help Add My Display",QDialogButtonBox.ActionRole);help_add.setObjectName("primaryButton");help_add.setToolTip("Safely scan a USB display and create a privacy-safe support package");help_add.setAccessibleName("Help add an unsupported display to ONI");help_add.clicked.connect(self.open_help_add_display);buttons.rejected.connect(self.accept);outer.addWidget(buttons)
         self.search.textChanged.connect(self._rebuild);self.status_filter.currentTextChanged.connect(self._rebuild);self.connected_only.toggled.connect(self._rebuild);self.brands.currentTextChanged.connect(self._rebuild_models);self.models.currentItemChanged.connect(self._show_details)
         self.live_timer=QTimer(self);self.live_timer.setInterval(500);self.live_timer.timeout.connect(self.refresh_live_state);self.live_timer.start();self.refresh_live_state()
+
+    def open_help_add_display(self):
+        HelpAddDisplayDialog(self).exec()
 
     def _matches(self,item,query):
         return not query or query in " ".join((item.manufacturer,item.family,item.model,*item.identifiers,item.connection_type,item.key)).casefold()

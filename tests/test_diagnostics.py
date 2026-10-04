@@ -85,6 +85,11 @@ def test_multiple_candidates_and_unrelated_exclusion():
     assert {item.instance_id for item in candidates}=={lcd.instance_id,second.instance_id}
 
 
+def test_usb_billboard_is_not_misclassified_as_a_display_candidate():
+    billboard=record(vid="2109",pid="8884",service="WinUSB",description="USB Billboard Device")
+    assert scanner_for(billboard).candidates()==()
+
+
 def test_explicit_diagnostic_snapshot_uses_broad_usb_enumerator():
     class Api:
         def enumerate_present_devices(self):raise AssertionError("normal narrow discovery should not be selected")

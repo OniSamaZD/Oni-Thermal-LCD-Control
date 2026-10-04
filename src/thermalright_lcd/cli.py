@@ -111,13 +111,10 @@ def main(argv=None) -> int:
     cr.add_argument("--transaction-file",type=Path,default=Path("analysis/pid5302-same-session-first-frame.json"));cr.add_argument("--output",type=Path,required=True)
     args = parser.parse_args(argv)
     if args.command == "diagnostic":
-        from .diagnostics import SafeScanner, export_support_package, inspect_support_package
+        from .diagnostics import default_safe_scanner, export_support_package, inspect_support_package
         if args.diagnostic_command == "inspect":
             print(json.dumps(inspect_support_package(args.package), indent=2)); return 0
-        from .windows_hid import enumerate_paths, inspect_path
-        from .diagnostics import read_only_winusb_interfaces
-        scanner = SafeScanner(hid_enumerator=enumerate_paths, hid_inspector=inspect_path,
-                              usb_descriptor_reader=read_only_winusb_interfaces)
+        scanner = default_safe_scanner()
         results = scanner.scan(getattr(args, "target", None))
         if args.diagnostic_command == "scan":
             print(json.dumps([{"instance_id": item.fingerprint.instance_id, "vid_pid": item.fingerprint.vid_pid,

@@ -174,6 +174,8 @@ def _candidate(record: WindowsDeviceMetadata, catalog_ids: set[str]) -> bool:
     ident = _identity(record.instance_id)
     if not ident or record.class_name.casefold() in _EXCLUDED_CLASSES:
         return False
+    if "billboard" in " ".join((record.description, record.manufacturer)).casefold():
+        return False
     vid_pid = f"{ident[0]:04x}:{ident[1]:04x}"
     known = vid_pid in catalog_ids or ident[0] in _KNOWN_VENDORS
     display_hint = any(token in " ".join((record.class_name, record.service, record.description, record.manufacturer)).casefold()
@@ -265,6 +267,16 @@ class SafeScanner:
                 tuple(item.instance_id for item in members if item.instance_id.casefold()!=root.instance_id.casefold()))
             results.append(ScanResult(fp,match_catalog(fp),tuple(warnings)))
         return tuple(results)
+
+
+def default_safe_scanner() -> SafeScanner:
+    """Build the production Safe Scan reader set without output-capable adapters."""
+    from .windows_hid import enumerate_paths, inspect_path
+    return SafeScanner(
+        hid_enumerator=enumerate_paths,
+        hid_inspector=inspect_path,
+        usb_descriptor_reader=read_only_winusb_interfaces,
+    )
 
 
 def read_only_winusb_interfaces(record: WindowsDeviceMetadata) -> tuple[InterfaceFingerprint, ...]:
