@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $PortableExe = Join-Path $RepoRoot "dist\Oni Thermal LCD Control.exe"
-$InstallerPath = Join-Path $RepoRoot "dist-installer\Oni-Thermal-LCD-Control-Setup.exe"
+$InstallerPath = Join-Path $RepoRoot "dist-installer\Oni-Thermal-LCD-Control-0.2.0-beta.1-Setup.exe"
 $ScriptPath = Join-Path $PSScriptRoot "oni_thermal_lcd.iss"
 
 if (-not (Test-Path -LiteralPath $PortableExe)) {

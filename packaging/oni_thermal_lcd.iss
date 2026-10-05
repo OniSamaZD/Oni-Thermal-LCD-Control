@@ -1,10 +1,10 @@
-#define AppName "Oni Thermal LCD Control"
-#define AppVersion "0.1.1"
+#define AppName "Oni Thermal LCD Control Beta"
+#define AppVersion "0.2.0-beta.1"
 #define AppPublisher "Oni Thermal LCD contributors"
 #define AppExeName "Oni Thermal LCD Control.exe"
 
 [Setup]
-AppId={{8A71E29B-7E5B-4A61-9E2E-B79A7F6EF5A1}
+AppId={{62947771-A392-45AE-98C2-03C7A9612ED4}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -13,12 +13,12 @@ VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} Installer
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoVersion={#AppVersion}.0
-DefaultDirName={autopf}\Oni Thermal LCD Control
-DefaultGroupName=Oni Thermal LCD Control
+VersionInfoVersion=0.2.0.1
+DefaultDirName={autopf}\Oni Thermal LCD Control Beta
+DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist-installer
-OutputBaseFilename=Oni-Thermal-LCD-Control-Setup
+OutputBaseFilename=Oni-Thermal-LCD-Control-0.2.0-beta.1-Setup
 SetupIconFile=..\assets\oni-thermal-lcd.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
@@ -43,8 +43,8 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Oni Thermal LCD Control"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\Oni Thermal LCD Control"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

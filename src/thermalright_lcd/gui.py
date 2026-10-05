@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
     QDialogButtonBox, QListWidget, QListWidgetItem, QAbstractItemView, QTabWidget, QScrollArea,
     QSystemTrayIcon, QMenu, QInputDialog, QStackedWidget, QSizePolicy, QLineEdit, QSpinBox, QDoubleSpinBox,
     QSlider, QToolButton, QBoxLayout, QSplitter, QButtonGroup, QGroupBox, QGridLayout, QLayout)
+from . import __version__
 from .media import cache_overlay, render_static, render_image, FitMode, MediaPipeline, QUALITY_PROFILES
 from .playback import open_frame_source, FrameScheduler, SharedFrameScheduler
 from .settings import SettingsStore, AppSettings, DisplayProfile
@@ -3062,7 +3063,7 @@ QScrollArea#pageScroll { border: none; background: transparent; }
 
 def main():
     log_path=Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"logs";configure_logging(log_path)
-    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);initial=SettingsStore(Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"settings.json").load();apply_interaction_effects(app,STYLE,initial.effects_enabled,initial.theme_name);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion("0.1.1");app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
+    app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False);initial=SettingsStore(Path(os.environ.get("LOCALAPPDATA",Path.home()))/"OniThermalLcd"/"settings.json").load();apply_interaction_effects(app,STYLE,initial.effects_enabled,initial.theme_name);app.setApplicationName("Oni Thermal LCD Control");app.setApplicationVersion(__version__);app.setOrganizationName("Oni Thermal LCD contributors");app.setWindowIcon(QIcon(str(bundled_path("assets/oni-thermal-lcd.ico"))))
     instance=SingleInstance(os.environ.get("ONI_LCD_INSTANCE_NAME","OniThermalLcdControl-v1"),parent=app)
     if not instance.acquire_or_notify():return 0
     splash=OniSplash(bundled_path("assets/oni-thermal-lcd-icon.png"));splash.show();app.processEvents()

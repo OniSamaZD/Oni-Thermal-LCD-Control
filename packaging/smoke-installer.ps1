@@ -5,14 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $PSScriptRoot "..\dist-installer\Oni-Thermal-LCD-Control-Setup.exe"
+    $InstallerPath = Join-Path $PSScriptRoot "..\dist-installer\Oni-Thermal-LCD-Control-0.2.0-beta.1-Setup.exe"
 }
 $InstallerPath = [IO.Path]::GetFullPath($InstallerPath)
 $SmokeRoot = Join-Path ([IO.Path]::GetTempPath()) ("oni-installer-smoke-" + [Guid]::NewGuid().ToString("N"))
 $InstallDir = Join-Path $SmokeRoot "app"
 $AppDataDir = Join-Path $SmokeRoot "appdata"
-$StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Oni Thermal LCD Control.lnk"
-$Desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "Oni Thermal LCD Control.lnk"
+$StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Oni Thermal LCD Control Beta.lnk"
+$Desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "Oni Thermal LCD Control Beta.lnk"
 $Sentinel = Join-Path $AppDataDir "OniThermalLcd\preserve-after-uninstall.txt"
 $UninstallRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
 $InstalledSplash = Join-Path $SmokeRoot "installed-splash.png"
@@ -35,7 +35,7 @@ try {
         if (-not (Test-Path -LiteralPath $Path)) { throw "Expected installed item is missing: $Path" }
     }
     $UninstallEntry = Get-ChildItem -LiteralPath $UninstallRoot | Where-Object {
-        $_.GetValue("DisplayName") -eq "Oni Thermal LCD Control"
+        $_.GetValue("DisplayName") -eq "Oni Thermal LCD Control Beta"
     } | Select-Object -First 1
     if (-not $UninstallEntry) { throw "Registered uninstall entry is missing" }
 

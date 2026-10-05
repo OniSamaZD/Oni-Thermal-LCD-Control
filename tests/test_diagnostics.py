@@ -4,6 +4,7 @@ import zipfile
 
 import pytest
 
+from thermalright_lcd import __version__
 from thermalright_lcd.diagnostics import (EndpointFingerprint, Evidence, HardwareFingerprint,
     InterfaceFingerprint, MatchState, Redactor, SafeScanner, export_support_package,
     inspect_support_package, match_catalog, peerless_vision_fixture)
@@ -131,6 +132,7 @@ def test_public_package_manifest_checksums_and_roundtrip(tmp_path):
     result=scanner_for(record()).scan()[0]
     package=export_support_package((result,),tmp_path)
     inspected=inspect_support_package(package)
+    assert inspected["manifest"]["oni_version"]==__version__
     assert inspected["manifest"]["active_write_operations_performed"] is False
     assert inspected["manifest"]["private_report_included"] is False
     assert inspected["reconstructed_fingerprint_ids"]==[result.fingerprint.deterministic_id()]

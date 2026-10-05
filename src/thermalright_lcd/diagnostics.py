@@ -20,6 +20,7 @@ import zipfile
 import ctypes
 from ctypes import wintypes
 
+from . import __version__
 from .devices.catalog import catalog_models
 from .windows_metadata import WindowsDeviceMetadata, WindowsMetadataSnapshot, collect_windows_metadata_snapshot
 
@@ -341,7 +342,7 @@ def _result_dict(result: ScanResult, *, public: bool, redactor: Redactor | None 
 
 
 def export_support_package(results: Iterable[ScanResult], output_dir: Path, *, include_private: bool = False,
-                           now: datetime | None = None, oni_version: str = "0.1.1") -> Path:
+                           now: datetime | None = None, oni_version: str = __version__) -> Path:
     items=tuple(results)
     if not items: raise ValueError("at least one selected target is required")
     now=(now or datetime.now(timezone.utc)).astimezone(timezone.utc); stamp=now.strftime("%Y%m%d-%H%M%S")

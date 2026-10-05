@@ -1,6 +1,10 @@
 import ast
+import re
+import tomllib
 import unittest
 from pathlib import Path
+
+from thermalright_lcd import __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,14 +32,31 @@ class PackagingTests(unittest.TestCase):
 
     def test_version_metadata_matches_project(self):
         metadata = (ROOT / "packaging/version_info.txt").read_text(encoding="utf-8")
-        project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         runtime = (ROOT / "src/thermalright_lcd/gui.py").read_text(encoding="utf-8")
-        package = (ROOT / "src/thermalright_lcd/__init__.py").read_text(encoding="utf-8")
-        self.assertIn('version = "0.1.1"', project)
-        self.assertIn("StringStruct(u'ProductVersion', u'0.1.1')", metadata)
-        self.assertIn('setApplicationVersion("0.1.1")', runtime)
-        self.assertIn('__version__ = "0.1.1"', package)
+        installer = (ROOT / "packaging/oni_thermal_lcd.iss").read_text(encoding="utf-8")
+        self.assertEqual(__version__, "0.2.0-beta.1")
+        self.assertEqual(project["project"]["version"], "0.2.0b1")
+        self.assertIn("filevers=(0, 2, 0, 1)", metadata)
+        self.assertIn("StringStruct(u'FileVersion', u'0.2.0.1')", metadata)
+        self.assertIn("StringStruct(u'ProductVersion', u'0.2.0-beta.1')", metadata)
+        self.assertIn("setApplicationVersion(__version__)", runtime)
+        self.assertIn('#define AppVersion "0.2.0-beta.1"', installer)
+        self.assertIn("VersionInfoVersion=0.2.0.1", installer)
+        self.assertIn("Oni-Thermal-LCD-Control-0.2.0-beta.1-Setup", installer)
         self.assertIn("Oni Thermal LCD Control.exe", metadata)
+
+    def test_beta_installer_has_distinct_side_by_side_identity(self):
+        installer = (ROOT / "packaging/oni_thermal_lcd.iss").read_text(encoding="utf-8")
+        self.assertIn('#define AppName "Oni Thermal LCD Control Beta"', installer)
+        app_id = re.search(r"^AppId=\{\{([^}]+)\}$", installer, re.MULTILINE)
+        self.assertIsNotNone(app_id)
+        self.assertNotEqual(app_id.group(1), "8A71E29B-7E5B-4A61-9E2E-B79A7F6EF5A1")
+        self.assertIn(r"DefaultDirName={autopf}\Oni Thermal LCD Control Beta", installer)
+
+    def test_sidebar_contract_version_is_not_release_version(self):
+        runtime = (ROOT / "src/thermalright_lcd/gui.py").read_text(encoding="utf-8")
+        self.assertIn('QLabel("v1.6.0")', runtime)
 
     def test_build_clean_is_scoped_to_repository(self):
         source = (ROOT / "packaging/build-portable.ps1").read_text(encoding="utf-8")
