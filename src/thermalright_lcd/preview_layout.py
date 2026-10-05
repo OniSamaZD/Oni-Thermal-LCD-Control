@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import statistics
 
 
 @dataclass(frozen=True, slots=True)
 class PhysicalPreviewSpec:
     pixel_size: tuple[int, int]
     diagonal_inches: float | None = None
+    physical_scale_known: bool | None = None
 
     @property
     def aspect_ratio(self) -> float:
@@ -24,12 +24,17 @@ class PhysicalPreviewSpec:
             raise ValueError("preview pixel dimensions must be positive")
         return width / height
 
+    @classmethod
+    def from_profile(cls, profile) -> "PhysicalPreviewSpec":
+        size = profile.render_size or profile.native_size
+        if size is None:
+            raise ValueError("physical profile has no preview geometry")
+        return cls(size, profile.diagonal_inches, profile.diagonal_inches is not None or profile.active_width_mm is not None)
 
-def _effective_diagonals(specs: tuple[PhysicalPreviewSpec, ...]) -> tuple[float, ...]:
-    """Return safe relative diagonals without claiming missing measurements."""
-    known = [float(spec.diagonal_inches) for spec in specs if spec.diagonal_inches and spec.diagonal_inches > 0]
-    fallback = statistics.median(known) if known else 7.0
-    return tuple(float(spec.diagonal_inches) if spec.diagonal_inches and spec.diagonal_inches > 0 else fallback for spec in specs)
+
+def _physical_envelope(spec: PhysicalPreviewSpec, diagonal: float) -> tuple[float, float]:
+    height = diagonal / math.sqrt(spec.aspect_ratio * spec.aspect_ratio + 1.0)
+    return height * spec.aspect_ratio, height
 
 
 def physical_preview_sizes(
@@ -38,27 +43,35 @@ def physical_preview_sizes(
 ) -> tuple[tuple[int, int], ...]:
     """Fit previews with one shared pixels-per-inch scale.
 
-    A common scale makes known physical sizes comparable.  Each result also
-    remains contained by its own card allocation and preserves pixel aspect.
-    Unknown physical sizes use the median known diagonal (or a neutral 7-inch
-    fallback when all are unknown), so they remain safe and non-authoritative.
+    A common scale makes known physical sizes comparable. Each result remains
+    contained by its own card allocation and preserves pixel aspect. Unknown
+    physical sizes use an independent neutral fit and never constrain or imply
+    membership in the known physical comparison scale.
     """
     if len(specs) != len(bounds):
         raise ValueError("each preview requires one available-size bound")
     if not specs:
         return ()
-    diagonals = _effective_diagonals(specs)
-    envelopes: list[tuple[float, float]] = []
-    scales: list[float] = []
-    for spec, diagonal, (available_width, available_height) in zip(specs, diagonals, bounds):
-        aspect = spec.aspect_ratio
-        unit_height = diagonal / math.sqrt(aspect * aspect + 1.0)
-        unit_width = unit_height * aspect
-        envelopes.append((unit_width, unit_height))
-        scales.append(min(max(1, available_width) / unit_width, max(1, available_height) / unit_height))
-    shared_scale = max(0.01, min(scales))
-    return tuple(
-        (max(1, min(int(available_width), round(unit_width * shared_scale))),
-         max(1, min(int(available_height), round(unit_height * shared_scale))))
-        for (unit_width, unit_height), (available_width, available_height) in zip(envelopes, bounds)
-    )
+    for spec in specs:spec.aspect_ratio
+    known_indices=tuple(index for index,spec in enumerate(specs) if spec.diagonal_inches and spec.diagonal_inches>0)
+    shared_scale=None
+    if known_indices:
+        shared_scale=min(
+            min(max(1,bounds[index][0])/(_physical_envelope(specs[index],float(specs[index].diagonal_inches))[0]),
+                max(1,bounds[index][1])/(_physical_envelope(specs[index],float(specs[index].diagonal_inches))[1]))
+            for index in known_indices
+        )
+        shared_scale=max(.01,shared_scale)
+    result=[]
+    for index,(spec,(available_width,available_height)) in enumerate(zip(specs,bounds)):
+        available_width=max(1,int(available_width));available_height=max(1,int(available_height))
+        if index in known_indices:
+            unit_width,unit_height=_physical_envelope(spec,float(spec.diagonal_inches));width=round(unit_width*shared_scale);height=round(unit_height*shared_scale)
+        else:
+            # Unknown-size previews are deliberately neutral and fitted on their
+            # own.  They do not participate in, or constrain, physical scaling.
+            target_width=max(1,round(available_width*.72));target_height=max(1,round(available_height*.72))
+            scale=min(target_width/spec.pixel_size[0],target_height/spec.pixel_size[1])
+            width=round(spec.pixel_size[0]*scale);height=round(spec.pixel_size[1]*scale)
+        result.append((max(1,min(available_width,width)),max(1,min(available_height,height))))
+    return tuple(result)

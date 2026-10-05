@@ -26,7 +26,16 @@ class DeviceDefinition:
     support_status: str = "Physically verified"
     brightness_support: str = "software"
     maximum_fps: int = 30
-    physical_diagonal_inches: float | None = None
+    physical_profile_id: str = ""
+
+    @property
+    def physical_profile(self):
+        from ..physical_display import physical_profile
+        return physical_profile(self.physical_profile_id or self.vid_pid, self.nominal_size, self.encoded_size)
+
+    @property
+    def physical_diagonal_inches(self) -> float | None:
+        return self.physical_profile.diagonal_inches
 
 
 @dataclass(frozen=True, slots=True)

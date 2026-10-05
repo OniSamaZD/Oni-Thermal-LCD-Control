@@ -30,6 +30,7 @@ def test_unknown_physical_size_uses_safe_non_authoritative_fallback():
     assert first[0] <= 700 and first[1] <= 300
     assert second[0] <= 700 and second[1] <= 300
     assert second[0] / second[1] == pytest.approx(800 / 480, rel=0.01)
+    assert second[0] < 700 and second[1] < 300
 
 
 def test_all_unknown_displays_remain_contained_and_aspect_correct():

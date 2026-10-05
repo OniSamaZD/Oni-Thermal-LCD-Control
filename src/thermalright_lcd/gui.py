@@ -42,6 +42,7 @@ from .devices.registry import DEVICES, device_definition
 from .devices.catalog import catalog_models
 from .supported_displays import LiveDisplayState, catalog_live_states, filter_catalog_states, match_catalog_model
 from .preview_layout import PhysicalPreviewSpec, physical_preview_sizes
+from .physical_display import geometry_status_text, profile_for_catalog_model
 from .help_add_display import HelpAddDisplayDialog
 from .oni_pages import (
     OniDiagnosticsPage, OniHardwareMonitorPage, OniHomePage, OniMediaLibraryPage,
@@ -223,7 +224,8 @@ class SupportedDisplaysDialog(QDialog):
         state=current.data(Qt.UserRole);model=state.model;resolutions=", ".join(f"{w} × {h}" for w,h in model.resolutions) or "Model dependent";ids=", ".join(model.identifiers) or "Model-specific identity";live="ACTIVE · CONNECTED" if state.active else "CONNECTED" if state.connected else "Not currently detected"
         explanation=("Physically validated by the ONI project." if model.status=="Verified" else "Experimental Support\n\nEnd-to-end display output is implemented, but this physical model has not yet been validated by the ONI project." if model.status=="Experimental" else "Output support is currently incomplete for this device. ONI will not send display frames until a safe implementation is available.")
         family_note=f"\nDevice family\n{model.family}" if model.family_level or model.family!=model.model else ""
-        self.details.setText(f"{model.status.upper()}\n{live}\n\n{model.model}\n{model.manufacturer}{family_note}\n\nResolution / render sizes\n{resolutions}\n\nConnection / transport\n{model.connection_type}\n\nVID:PID / identifiers\n{ids}\n\n{explanation}\n\n{model.notes}")
+        profile=profile_for_catalog_model(model);physical=geometry_status_text(profile);excluded=f"\nExcluded render rows\n{profile.excluded_rows}" if profile.excluded_rows else ""
+        self.details.setText(f"{model.status.upper()}\n{live}\n\n{model.model}\n{model.manufacturer}{family_note}\n\nResolution / render sizes\n{resolutions}\n\nPhysical screen size\n{physical}{excluded}\n\nConnection / transport\n{model.connection_type}\n\nVID:PID / identifiers\n{ids}\n\n{explanation}\n\n{model.notes}")
 
 def product_photo(device_id:str)->QLabel:
     asset_name="trofeo-vision-9-16-official.png" if device_id.endswith("5408") else "trofeo-vision-6-86-official.png"
@@ -750,7 +752,8 @@ class DisplayCard(QFrame):
         else:self._apply_physical_preview_size((max(1,self.preview_column.width()-8),max(1,self.preview_column.height()-self.preview_footer.sizeHint().height()-18)))
 
     def _physical_preview_spec(self):
-        return PhysicalPreviewSpec(self.size_target,self.physical_diagonal_inches)
+        profile=getattr(self,"physical_profile",None)
+        return PhysicalPreviewSpec.from_profile(profile) if profile is not None else PhysicalPreviewSpec(self.size_target,self.physical_diagonal_inches)
 
     def _preview_available_extent(self):
         available=self.preview_column.contentsRect()
@@ -1485,7 +1488,11 @@ class MainWindow(QMainWindow):
 
     def _add_discovered_display(self, observation: DiscoveredDisplay):
         definition=device_definition(observation.device_id)
-        card=DisplayCard(f"{definition.manufacturer.upper()} · {definition.model}",definition.encoded_size,observation.device_id,media_directory_provider=self._chooser_provider,media_directory_selected=self._chooser_selected,physical_diagonal_inches=definition.physical_diagonal_inches,model_name=definition.model)
+        profile=definition.physical_profile
+        card=DisplayCard(f"{definition.manufacturer.upper()} · {definition.model}",definition.encoded_size,observation.device_id,media_directory_provider=self._chooser_provider,media_directory_selected=self._chooser_selected,physical_diagonal_inches=profile.diagonal_inches,model_name=definition.model)
+        card.physical_profile=profile
+        card.preview.setToolTip(geometry_status_text(profile))
+        if profile.diagonal_inches is None:card.device_spec_label.setText(f"{definition.encoded_size[0]} × {definition.encoded_size[1]} · Physical size unknown")
         card.physical_id=observation.stable_id;self.cards.append(card);self.card_by_physical_id[observation.stable_id]=card;self.card_by_id.setdefault(observation.device_id,card);self.display_splitter.addWidget(card)
         return card
 
