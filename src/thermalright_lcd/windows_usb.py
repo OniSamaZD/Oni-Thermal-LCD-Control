@@ -198,13 +198,16 @@ def reference_winusb_connection(candidate, api=None):
         path="\\\\?\\"+candidate.instance_id.replace("\\","#")+"#"+guid
     api=api or CtypesWinUsbApi();handle=api.create_file(path,3000);usb=None
     try:
-        usb=api.winusb_initialize(handle);outs=[];ins=[]
+        usb=api.winusb_initialize(handle);outs=[];ins=[];packet_sizes={}
         for ep in (*range(1,16),*range(0x81,0x90)):
             try:
                 pipe=api.query_pipe(usb,0,ep)
-                if pipe["type"]==2:(ins if ep&0x80 else outs).append(ep)
+                if pipe["type"]==2:
+                    (ins if ep&0x80 else outs).append(ep);packet_sizes[ep]=int(pipe.get("maximum_packet_size",0))
             except Exception:pass
         if len(outs)!=1 or len(ins)!=1:raise SafetyError("reference WinUSB interface must expose exactly one bulk OUT and one bulk IN pipe")
+        if candidate.vid_pid.lower()=="87ad:70db" and (packet_sizes[outs[0]]!=512 or packet_sizes[ins[0]]!=512):
+            raise SafetyError("ChiZhu WinUSB pipes must use 512-byte maximum packets")
     finally:
         if usb:api.free(usb)
         api.close_handle(handle)

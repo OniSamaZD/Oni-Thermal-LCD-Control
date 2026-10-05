@@ -93,6 +93,14 @@ class MediaPipeline:
             from .devices.registry import device_definition
             self.TARGETS[device_id]=device_definition(device_id).encoded_size
         return self.TARGETS[device_id]
+    @staticmethod
+    def _output_rotation(device_id):
+        from .devices.registry import device_definition
+        orientation=device_definition(device_id).orientation
+        if orientation.startswith("rotation-"):
+            try:return int(orientation.removeprefix("rotation-"))%360
+            except ValueError:return 0
+        return 0
     def _encode(self,prepared,device_id):
         from .encoder import encode_5302,encode_5408,encode_reference,image_to_rgb565
         if device_id=="0416:5408":return encode_5408(prepared.jpeg)
@@ -117,7 +125,8 @@ class MediaPipeline:
             buffer=np.empty((th,tw,3),dtype=np.uint8);self._final_buffers[vid_pid]=buffer
         return buffer
     def prepare_static(self,path:Path,vid_pid:str,mode:FitMode=FitMode.FIT,rotation:int=0,quality:int=95,pan_x:int=0,pan_y:int=0,zoom:float=1.0,brightness:int=100):
-        path=Path(path);stat=path.stat();key=(str(path.resolve()),stat.st_mtime_ns,stat.st_size,vid_pid,mode.value,rotation%360,quality,int(pan_x),int(pan_y),round(float(zoom),3),int(brightness))
+        rotation=(rotation+self._output_rotation(vid_pid))%360
+        path=Path(path);stat=path.stat();key=(str(path.resolve()),stat.st_mtime_ns,stat.st_size,vid_pid,mode.value,rotation,quality,int(pan_x),int(pan_y),round(float(zoom),3),int(brightness))
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key);self.cache_metrics["source_hits"]+=1;self.cache_metrics["composition_skips"]+=1;self.cache_metrics["jpeg_skips"]+=1;return self._cache[key]
@@ -133,6 +142,7 @@ class MediaPipeline:
         return value
     def prepare_image(self,image:Image.Image,vid_pid:str,mode:FitMode=FitMode.FIT,rotation:int=0,quality:int=95,pan_x:int=0,pan_y:int=0,zoom:float=1.0,brightness:int=100,overlay:Image.Image|None=None):
         """Prepare one decoded animation/video frame without retaining it."""
+        rotation=(rotation+self._output_rotation(vid_pid))%360
         prepared=render_image(image,self._target(vid_pid),mode,rotation,quality,None,pan_x,pan_y,zoom,brightness,overlay)
         encoded=self._encode(prepared,vid_pid)
         self.total_prepares+=1
@@ -143,6 +153,7 @@ class MediaPipeline:
         import cv2
         if not _opencv_configured:configure_opencv_threads()
         from .encoder import encode_5302,encode_5408,encode_reference,image_to_rgb565
+        rotation=(rotation+self._output_rotation(vid_pid))%360
         total_started=time.perf_counter();frame=bgr
         turns=(rotation%360)//90
         if turns==1:frame=cv2.rotate(frame,cv2.ROTATE_90_CLOCKWISE)

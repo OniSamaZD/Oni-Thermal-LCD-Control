@@ -34,12 +34,16 @@ class ThermalrightPanelModel:
     identifier: str = ""
     physically_verified: bool = False
     reference_output: bool = True
+    community_validated: bool = False
+    evidence_source: str = ""
 
 
 def _m(key, name, vid_pid, size, *, render=None, transport="winusb", protocol="chizhu",
-       pixel="jpeg", pm=None, sub=None, identifier="", verified=False):
+       pixel="jpeg", pm=None, sub=None, identifier="", verified=False,
+       community_validated=False, evidence_source=""):
     return ThermalrightPanelModel(key, name, vid_pid, size, render or size, transport,
-                                  protocol, pixel, pm, sub, identifier, verified, True)
+                                  protocol, pixel, pm, sub, identifier, verified, True,
+                                  community_validated, evidence_source)
 
 
 _models = [
@@ -107,7 +111,12 @@ _chizhu = {
 for (pm, sub), (key, name, size) in _chizhu.items():
     pixel = "rgb565-be" if pm == 0x20 else "jpeg"
     if not any(model.key == key for model in _models):
-        _models.append(_m(key, name, "87ad:70db", size, pm=pm, sub=sub, pixel=pixel))
+        community = key == "frozen-warframe-ultra"
+        _models.append(_m(
+            key, name, "87ad:70db", size, pm=pm, sub=sub, pixel=pixel,
+            community_validated=community,
+            evidence_source="hstones community physical capture" if community else "",
+        ))
 
 MODELS = {model.key: model for model in _models}
 SUPPORTED_VID_PIDS = frozenset(model.vid_pid for model in MODELS.values()) | {"0418:5303", "0418:5304"}
@@ -176,6 +185,46 @@ def _only(candidates: list[ThermalrightPanelModel]) -> ThermalrightPanelModel | 
     return next(iter(unique.values())) if len(unique) == 1 else None
 
 
+@dataclass(frozen=True, slots=True)
+class ChiZhuInitResponse:
+    """Structured ChiZhu init response without conflating firmware layouts.
+
+    Existing reference fixtures use the low byte at offset 28 as a legacy
+    discriminator.  The hstones Frozen Warframe Ultra capture instead carries
+    a distinct value of 32 there and its variant discriminator at offset 32.
+    Both fields remain explicit so other shared-VID/PID models retain their
+    established fail-closed behavior.
+    """
+    identifier: str
+    magic_valid: bool
+    signature: int
+    pm: int
+    field_28: int
+    variant: int
+    field_36: int
+    field_40: int
+    ready: int
+
+
+def parse_chizhu_init_response(response: bytes) -> ChiZhuInitResponse | None:
+    if len(response) < 60:
+        return None
+    if response[4:8] == b"\xa1\xa2\xa3\xa4":
+        return None
+    identifier=response[4:20].rstrip(b"\0").decode("ascii","ignore")
+    values=struct.unpack_from("<7I",response,20)
+    return ChiZhuInitResponse(identifier,response[:4] == b"\x12\x34\x56\x78",*values[:6],struct.unpack_from("<I",response,56)[0])
+
+
+def _captured_frozen_warframe_ultra(response: ChiZhuInitResponse) -> bool:
+    """Match only the complete, real community-captured firmware signature."""
+    return (
+        response.magic_valid and response.identifier == "SSCRM-V1" and response.pm == 6 and
+        response.field_28 == 32 and response.variant == 1 and
+        response.field_36 == 1 and response.field_40 == 2 and response.ready == 1
+    )
+
+
 def detect_model(vid_pid: str, transport: str, response: bytes) -> ThermalrightPanelModel | None:
     """Return one exact model or ``None``; never guesses on shared identifiers."""
     vid_pid, transport = vid_pid.lower(), transport.lower()
@@ -192,10 +241,19 @@ def detect_model(vid_pid: str, transport: str, response: bytes) -> ThermalrightP
             return None
         return MODELS[{1:"trofeo-vision-916", 2:"trofeo-vision-916-v2", 3:"trofeo-vision-916-v2", 5:"trofeo-vision-113"}.get(response[20], "")] if response[20] in (1,2,3,5) else None
     if vid_pid == "87ad:70db" and transport == "winusb":
+        parsed=parse_chizhu_init_response(response)
+        if parsed is not None and parsed.pm == 6 and parsed.field_28 == 32:
+            # This observed firmware layout stores its variant at offset 32.
+            # Only the complete community capture is authorized; incomplete or
+            # altered evidence must not fall through to the legacy (6, None)
+            # Frozen Vision V2 wildcard.
+            return MODELS["frozen-warframe-ultra"] if _captured_frozen_warframe_ultra(parsed) else None
         if len(response) < 29 or response[4:8] == b"\xa1\xa2\xa3\xa4":
             return None
+        if response[24] == 6 and response[28] == 32:
+            return None
         pm, sub = response[24], response[28]
-        identifier = response[4:20].rstrip(b"\0").decode("ascii", "ignore")
+        identifier = parsed.identifier if parsed is not None else response[4:20].rstrip(b"\0").decode("ascii","ignore")
         strict = [m for m in MODELS.values() if m.vid_pid == vid_pid and m.identifier == identifier and m.sub == sub]
         if strict:
             return _only(strict)

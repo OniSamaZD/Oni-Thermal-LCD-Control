@@ -1,0 +1,17 @@
+{
+  "schema": "oni-community-physical-capture/1",
+  "tester": "hstones",
+  "model": "Frozen Warframe Ultra",
+  "status": "community physical capture; not ONI physical verification",
+  "vid_pid": "87ad:70db",
+  "bcd_device": "0x0407",
+  "transport": "winusb",
+  "interface_class": "vendor-specific",
+  "bulk_out": "0x01",
+  "bulk_in": "0x81",
+  "maximum_packet_size": 512,
+  "resolution": [480, 480],
+  "orientation_degrees": 180,
+  "init_packet_hex": "12345678000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000",
+  "init_response_hex": "12345678535343524d2d5631000000000000000052ac5d8f06000000200000000100000001000000020000000000000000000000000000000100000000000000"
+}

@@ -23,13 +23,20 @@ def install_reference_binding(stable_id: str, model, sender_factory, *, namespac
     suffix=hashlib.sha256(stable_id.encode("utf-8")).hexdigest()[:12]
     device_id=f"{namespace}:{model.key}:{suffix}"
     binding=ReferenceRuntimeBinding(device_id,stable_id,model,sender_factory);_BINDINGS[device_id]=binding
+    from .physical_display import physical_profile
+    profile=physical_profile(model.key,model.native_size,model.render_size)
+    support_status=("Implemented — community tested; ONI hardware validation pending"
+                    if getattr(model,"community_validated",False)
+                    else "Implemented — community hardware validation required")
+    orientation=f"rotation-{profile.output_orientation_degrees}" if profile.output_orientation_degrees else "landscape"
     DEVICES[device_id]=DeviceDefinition(
         device_id,getattr(model,"manufacturer","Thermalright"),model.name,model.render_size,model.native_size,
         model.transport,0,"dynamic","dynamic",model.transport,4096,
         model.protocol in {"trofeo-bulk","trofeo-bulk-ly1","ali"},
+        orientation=orientation,
         full_frame_jpeg_required=model.pixel_format=="jpeg",transport_factory="reference-runtime",
         connection_type={"hid":"HID","winusb":"WinUSB","scsi":"SCSI pass-through","serial":"USB serial"}[model.transport],
-        support_status="Implemented — community hardware validation required",maximum_fps=int(getattr(model,"maximum_fps",30)),
+        support_status=support_status,maximum_fps=int(getattr(model,"maximum_fps",30)),
         physical_profile_id=model.key,
     )
     from .persistence import POLICIES,VIDEO_TRANSPORT_TARGETS,PersistencePolicy
